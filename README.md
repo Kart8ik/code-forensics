@@ -6,16 +6,21 @@ To conduct an **empirical study** evaluating whether combining **static code met
 
 ## What’s here
 
+```
 code-forensics/
- ├── scripts/
- │    └── extract_git_data.py
- ├── data/    `make this if needed even though it is made automatically in the script`
- │    ├── commits.csv
- │    ├── file_changes.csv
- │    └── diffs.csv
- └── repos/   `add the cloned repos that are gonna be worked on here`
-      ├── repo_1/
-      └── repo_2/
+├── scripts/
+│   └── extract_git_data.py
+├── data/
+│   ├── commits.csv
+│   ├── file_changes.csv
+│   └── diffs.csv
+└── repos/
+    ├── repo_1/
+    └── repo_2/
+```
+
+- repos - add the cloned repos that are gonna be worked on here
+- data - make this if needed even though it is made automatically in the script
 
 
 ## Extraction rules (current)
