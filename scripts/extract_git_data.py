@@ -8,7 +8,7 @@ from git import Repo
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-REPO_NAME = "flask"    #change this before running for each repo
+REPO_NAME = "next.js"    #change this before running for each repo
 REPO_PATH = PROJECT_ROOT / "repos" / REPO_NAME
 
 OUTPUT_DIR = PROJECT_ROOT / "data"
@@ -22,7 +22,12 @@ DIFFS_CSV = OUTPUT_DIR / "diffs.csv"
 # Config
 # -----------------------
 MAX_COMMITS = 500
-SOURCE_EXTENSIONS = (".py", ".java")
+SOURCE_EXTENSIONS = (
+    ".py",          # Python
+    ".js", ".jsx",  # JavaScript
+    ".ts", ".tsx"   # TypeScript
+)
+
 MAX_DIFF_CHARS = 8000
 
 # -----------------------
