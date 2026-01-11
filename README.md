@@ -4,49 +4,98 @@
 
 To conduct an **empirical study** evaluating whether combining **static code metrics**, **classical machine learning**, and **LLM-based semantic reasoning** provides better code quality analysis than using each technique independently.
 
-## What’s here
+## Repository Structure
 
 ```
 code-forensics/
 ├── scripts/
-│   └── extract_git_data.py
+│   ├── extract_git_data.py       # Git history extraction
+│   ├── run_static_analysis.py    # Main static analysis runner
+│   ├── static_python.py          # Python metrics (radon)
+│   ├── static_js.py              # JS/TS metrics (Babel AST)
+│   ├── analyze_js_ast.js         # Node.js Babel AST analyzer
+│   ├── package.json              # Node.js dependencies
+│   └── extract_python_metrics.py # old version
 ├── data/
-│   ├── commits.csv
-│   ├── file_changes.csv
-│   └── diffs.csv
-└── repos/
-    ├── repo_1/
-    └── repo_2/
+│   ├── commits.csv               # Commit metadata
+│   ├── file_changes.csv          # Files changed per commit
+│   ├── diffs.csv                 # Code diffs
+│   └── metrics_all.csv           # Static analysis metrics 
+├── repos/
+│   └── <cloned_repos>/           # Target repositories
+└── cf-env/                       # Python virtual environment
 ```
 
-- repos - add the cloned repos that are gonna be worked on here
-- data - make this if needed even though it is made automatically in the script
+## Data Outputs
 
-
-## Extraction rules (current)
-- Processes at most `MAX_COMMITS` (default 500) from HEAD backwards. (latest 500 commits)
-- Skips merge commits (`len(commit.parents) != 1`).
-- Writes diffs only for files ending with `SOURCE_EXTENSIONS` (default: `.py`, `.java`) and only for `A`/`M` changes.
-- Diff text is capped at `MAX_DIFF_CHARS` to keep rows compact.
-- CSVs are initialized with headers if missing; subsequent runs append.
+| File | Description |
+|------|-------------|
+| `commits.csv` | Commit hash, author, date, message |
+| `file_changes.csv` | repo_name, commit_hash, file_path, change_type |
+| `diffs.csv` | Code diffs for source files |
+| `metrics_all.csv` | Static metrics: LOC, cyclomatic complexity, function count, imports |
 
 ## Setup
-1) Activate the venv (optional but recommended):
-   - PowerShell: `.\cf-env\Scripts\Activate.ps1`
-   - CMD: `.\cf-env\Scripts\activate.bat`
-2) Ensure dependencies if not using the bundled venv: `pip install -r requirements.txt`
-3) Clone the target repo into `repos/<repo_1>` (e.g., `repos/flask`).
 
-## Running the extractor
-1) Open `scripts/extract_git_data.py` and set `REPO_NAME` to the folder name under `repos/`.
-2) (Optional) Adjust `MAX_COMMITS`, `SOURCE_EXTENSIONS`, or `MAX_DIFF_CHARS`.
-3) Run:
-   ```
-   python scripts/extract_git_data.py
-   ```
-4) Outputs land in `data/` (created if absent). Re-running appends; delete/rename existing CSVs if you need a fresh run.
+### 1. Python Environment
+```powershell
+# Activate virtual environment
+.\cf-env\Scripts\Activate.ps1    # PowerShell
 
-## Notes & next steps
-- Keep repos up to date (`git pull`) before extracting to capture recent history.
-- For larger analyses, load the CSVs with pandas or DuckDB.
+# Or install dependencies manually
+pip install -r requirements.txt
+```
 
+### 2. Node.js Dependencies (for JS/TS analysis)
+```powershell
+cd scripts
+npm install
+```
+
+### 3. Clone Target Repositories
+```powershell
+cd repos
+git clone <repo_url>
+```
+
+## Running
+
+### Step 1: Extract Git Data
+```powershell
+python scripts/extract_git_data.py
+```
+- Edit `REPO_NAME` in the script to match your repo folder
+- Extracts commits, file changes, and diffs to `data/`
+
+### Step 2: Run Static Analysis
+```powershell
+python scripts/run_static_analysis.py
+```
+- Analyzes Python files using `radon` (LOC, complexity, maintainability index)
+- Analyzes JS/TS files using Babel AST parser (LOC, complexity, functions, imports)
+- Outputs to `data/metrics_all.csv`
+
+## Extraction Rules
+
+- Processes at most `MAX_COMMITS` (default 500) from HEAD backwards
+- Skips merge commits (`len(commit.parents) != 1`)
+- Writes diffs only for files with `SOURCE_EXTENSIONS` (`.py`, `.js`, `.ts`, `.tsx`, `.jsx`)
+- Diff text is capped at `MAX_DIFF_CHARS` to keep rows compact
+- CSVs are initialized with headers; subsequent runs append
+
+## Static Analysis Metrics
+
+| Metric | Python | JS/TS |
+|--------|--------|-------|
+| LOC | Lines of code (radon) | Lines of code (AST) |
+| CC | Cyclomatic complexity (radon) | Decision points (AST) |
+| MI | Maintainability index (radon) | N/A |
+| Functions | Function count | Functions, methods, arrows |
+| Imports | Import statements | ES6 imports + require() |
+
+## Notes
+
+- The static analysis is optimized to group files by commit, minimizing git checkouts
+- For large repos like Next.js (~6k files), expect ~1-2 hours for full analysis
+- Keep repos up to date (`git pull`) before extracting
+- For analysis, load CSVs with pandas or DuckDB
