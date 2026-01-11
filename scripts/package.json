@@ -1,0 +1,11 @@
+{
+  "name": "code-forensics-js-analyzer",
+  "version": "1.0.0",
+  "description": "Babel-based AST analyzer for JavaScript/TypeScript metrics",
+  "private": true,
+  "dependencies": {
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0"
+  }
+}
+
