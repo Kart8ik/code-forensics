@@ -1,17 +1,19 @@
 """
 ML Pipeline for Temporal Code Evolution Analysis
 
-This module implements an unsupervised ML pipeline that:
-1. Aggregates commit-level data into per-file temporal summaries
-2. Applies clustering and anomaly detection at the file level
-3. Produces structured, machine-readable JSON outputs
+Basically, this takes all those raw commit metrics and turns them into something
+actually useful - per-file feature vectors that capture how each file has evolved
+over time.
 
-The pipeline operates per-file (NOT per-repo) and focuses on:
-- Evolution patterns
-- Stability analysis  
-- Deviation detection
+What it does:
+1. Groups all the commit data by file (not repo - we care about individual files)
+2. Computes a bunch of features: churn, trends, volatility, etc.
+3. Runs clustering to find files that behave similarly
+4. Runs anomaly detection to flag weird evolution patterns
+5. Spits out JSON that an LLM can later explain in plain English
 
-Output feeds a downstream LLM explanation layer.
+The key insight here is that we're NOT predicting anything - just describing
+patterns. The LLM layer handles the "so what does this mean" part.
 """
 
 import argparse
@@ -29,49 +31,50 @@ from sklearn.metrics import silhouette_score
 
 
 # =============================================================================
-# CONFIGURATION CONSTANTS
+# CONFIG - tweak these if the defaults don't work for your data
 # =============================================================================
 
-# Minimum commits required per file to be included in analysis
+# Skip files with too few commits - need enough history to see patterns
 MIN_COMMITS_DEFAULT = 5
 
-# Recent window size for computing recent trends/volatility
+# How many recent commits to look at for "recent" trends
+# 20 is a decent window, but bump it up if your repos have lots of commits
 RECENT_WINDOW_DEFAULT = 20
 
-# KMeans cluster range for auto-selection via silhouette score
+# KMeans will try k=3 through k=10 and pick the best one via silhouette score
 K_MIN = 3
 K_MAX = 10
 
-# Isolation Forest contamination (expected proportion of outliers)
+# What fraction of files do we expect to be "weird"? 10% seems reasonable
 ISOLATION_CONTAMINATION = 0.1
 
-# Random seed for reproducibility
+# For reproducibility - same seed = same results every time
 RANDOM_STATE = 42
 
 # =============================================================================
-# THRESHOLD CONSTANTS FOR RULE-BASED LABELS
+# THRESHOLDS FOR LABELING - these turn numbers into words like "high"/"low"
 # =============================================================================
 
-# Churn rate thresholds: (low_upper, moderate_upper)
-# low: <= 0.3, moderate: 0.3-0.7, high: > 0.7
+# Churn: what % of commits actually change the file?
+# <= 30% = low, 30-70% = moderate, > 70% = high (file changes a lot)
 CHURN_THRESHOLDS = (0.3, 0.7)
 
-# CC trend thresholds for directional labeling
-# decreasing: < -threshold, stable: within threshold, increasing: > threshold
+# How much does CC need to change per commit to count as "increasing"?
+# 0.01 is pretty sensitive - even small slopes get flagged
 CC_TREND_THRESHOLD = 0.01
 
-# MI trend thresholds
+# Same idea for maintainability index - 0.1 per commit is noticeable
 MI_TREND_THRESHOLD = 0.1
 
-# Imports trend thresholds
+# And for imports - 0.05 new imports per commit on average
 IMPORTS_TREND_THRESHOLD = 0.05
 
-# Volatility thresholds (std deviation)
-# stable: <= threshold, oscillating: > threshold
+# When is a metric "oscillating" vs "stable"?
+# If std dev > 1.0, there's real movement happening
 VOLATILITY_THRESHOLD = 1.0
 
-# Recent vs historical comparison threshold (relative change)
-# improving/regressing if |recent - historical| > threshold * historical
+# For comparing recent vs historical: how different is "different"?
+# 20% change = worth noting
 RECENT_COMPARISON_THRESHOLD = 0.2
 
 
@@ -88,61 +91,60 @@ OUTPUT_CLUSTER_SUMMARY = DATA_DIR / "cluster_summary.json"
 
 
 # =============================================================================
-# FEATURE NAMES (for documentation and indexing)
+# THE 19 FEATURES WE COMPUTE PER FILE
 # =============================================================================
 
 FEATURE_NAMES = [
-    # Change Intensity (5)
-    "churn_rate",
-    "mean_abs_loc_delta",
-    "mean_abs_cc_delta",
-    "mean_abs_imports_delta",
-    "mean_abs_func_delta",
-    # Stability/Volatility (3)
-    "std_cc_after",
-    "std_imports_after",
-    "std_mi_after",
-    # Directional Trends (3)
-    "cc_trend",
-    "mi_trend",
-    "imports_trend",
-    # Structural Load (3)
-    "mean_cc_after",
-    "mean_imports_after",
-    "mean_func_after",
-    # Recent Window Features (5)
-    "recent_cc_trend",
-    "recent_mi_trend",
-    "recent_imports_trend",
-    "recent_cc_volatility",
-    "recent_imports_volatility",
+    # How much does this file get touched? (5 features)
+    "churn_rate",              # % of commits that actually change LOC
+    "mean_abs_loc_delta",      # avg lines changed per commit
+    "mean_abs_cc_delta",       # avg complexity change per commit  
+    "mean_abs_imports_delta",  # avg import changes per commit
+    "mean_abs_func_delta",     # avg function count change per commit
+    
+    # How stable are the metrics over time? (3 features)
+    "std_cc_after",            # complexity bouncing around?
+    "std_imports_after",       # imports bouncing around?
+    "std_mi_after",            # maintainability bouncing around?
+    
+    # Which direction are things heading? (3 features)
+    "cc_trend",                # complexity going up or down?
+    "mi_trend",                # maintainability improving?
+    "imports_trend",           # accumulating dependencies?
+    
+    # What's the absolute level? (4 features)
+    "mean_cc_after",           # how complex is this file generally?
+    "mean_mi_after",           # how maintainable is this file? (higher = better)
+    "mean_imports_after",      # how many imports typically?
+    "mean_func_after",         # how many functions?
+    
+    # Same questions but just for recent commits (5 features)
+    "recent_cc_trend",         # complexity trend lately
+    "recent_mi_trend",         # maintainability trend lately
+    "recent_imports_trend",    # imports trend lately
+    "recent_cc_volatility",    # is complexity stable lately?
+    "recent_imports_volatility", # are imports stable lately?
 ]
 
 
 # =============================================================================
-# STEP 1: DATA PREPARATION
+# STEP 1: LOAD THE DATA AND GROUP BY FILE
 # =============================================================================
 
 def load_and_prepare_data(
     min_commits: int = MIN_COMMITS_DEFAULT
 ) -> Tuple[pd.DataFrame, Dict[Tuple[str, str], pd.DataFrame]]:
     """
-    Load and prepare data for ML pipeline.
+    Load metrics and commits, merge them, group by file.
     
-    Steps:
-    1. Load metrics_all.csv and commits.csv
-    2. Join on (repo_name, commit_hash) to get timestamps
-    3. Group by (repo_name, file_path)
-    4. Sort each group by timestamp
-    5. Filter files with fewer than min_commits changes
+    The key thing here is we need timestamps to sort commits chronologically.
+    Without that, "trends" don't make sense. So we join with commits.csv.
     
-    Args:
-        min_commits: Minimum number of commits required per file
-        
-    Returns:
-        Tuple of:
-        - Full merged DataFrame
-        - Dictionary mapping (repo_name, file_path) -> sorted DataFrame
+    We also filter out files with too few commits - can't detect patterns
+    from like 2 data points.
+    
+    Returns a dict where each key is (repo, filepath) and value is a
+    DataFrame of that file's commits sorted by time.
     """
     print(f"Loading data from {DATA_DIR}...")
     
@@ -162,21 +164,19 @@ def load_and_prepare_data(
         how="left"
     )
     
-    # Handle any rows without matching timestamps
+    # Some commits might not have timestamps (shouldn't happen but let's be safe)
     missing_ts = merged_df["timestamp"].isna().sum()
     if missing_ts > 0:
         print(f"  Warning: {missing_ts} rows have no matching timestamp, using commit order")
-        # For rows without timestamps, we'll rely on the original order
         merged_df["timestamp"] = merged_df["timestamp"].fillna(pd.Timestamp.min)
     
-    # Group by (repo_name, file_path) and sort by timestamp
+    # Now group everything by file and sort chronologically
     file_groups: Dict[Tuple[str, str], pd.DataFrame] = {}
     
     for (repo, fpath), group in merged_df.groupby(["repo_name", "file_path"]):
-        # Sort by timestamp (commit order)
         sorted_group = group.sort_values("timestamp").reset_index(drop=True)
         
-        # Filter: only include files with enough commits
+        # Skip files without enough history - can't see patterns in 2 commits
         if len(sorted_group) >= min_commits:
             file_groups[(repo, fpath)] = sorted_group
     
@@ -189,33 +189,28 @@ def load_and_prepare_data(
 
 
 # =============================================================================
-# STEP 2: FEATURE ENGINEERING
+# STEP 2: TURN COMMIT HISTORY INTO FEATURES
 # =============================================================================
 
 def compute_linear_trend(series: pd.Series) -> float:
     """
-    Compute linear regression slope over a numeric series.
+    Fit a line through the values and return the slope.
     
-    Uses commit index as the independent variable (proxy for time).
-    Returns 0.0 if series has insufficient variance or length.
+    This tells us: is this metric going up, down, or staying flat?
+    We use commit index as "time" - not perfect but works well enough.
     
-    Args:
-        series: Pandas Series of numeric values
-        
-    Returns:
-        Slope of linear regression (rate of change per commit)
+    Returns 0 if there's not enough data or no variance (all same values).
     """
-    # Remove NaN values
     clean = series.dropna()
     
     if len(clean) < 2:
         return 0.0
     
-    # Check for zero variance (all identical values)
+    # If every value is identical, slope is 0 (avoid numerical issues)
     if clean.std() == 0:
         return 0.0
     
-    # Use commit index as x-axis
+    # Simple linear regression: x = commit number, y = metric value
     x = np.arange(len(clean))
     y = clean.values
     
@@ -231,21 +226,17 @@ def compute_file_features(
     recent_window: int = RECENT_WINDOW_DEFAULT
 ) -> pd.DataFrame:
     """
-    Compute feature vectors for each file based on its temporal history.
+    This is where the magic happens - turn a file's commit history into numbers.
     
-    Feature categories:
-    A. Change Intensity - How actively the file is modified
-    B. Stability/Volatility - How much metrics fluctuate
-    C. Directional Trends - Long-term trajectory of metrics
-    D. Structural Load - Absolute complexity levels
-    E. Recent Window - Same as B/C but on recent commits only
+    For each file we compute:
+    - Change intensity: how much does this file get modified?
+    - Volatility: are the metrics stable or bouncing around?
+    - Trends: is complexity growing? maintainability dropping?
+    - Structural load: how big/complex is this file in absolute terms?
+    - Recent window: same questions but just for the last N commits
     
-    Args:
-        file_groups: Dictionary from load_and_prepare_data()
-        recent_window: Number of recent commits for window features
-        
-    Returns:
-        DataFrame with one row per file, columns are features
+    The "recent vs historical" comparison is super useful - lets us see
+    if a file that was stable is now getting messy, or vice versa.
     """
     print(f"Computing features for {len(file_groups)} files...")
     
@@ -254,63 +245,50 @@ def compute_file_features(
     for (repo_name, file_path), group in file_groups.items():
         n_commits = len(group)
         
-        # ------------------------------------------------------------------
-        # A. CHANGE INTENSITY FEATURES
-        # ------------------------------------------------------------------
+        # --- How actively is this file being changed? ---
         
-        # churn_rate: proportion of commits with non-zero LOC change
+        # What fraction of commits actually touch this file's LOC?
         loc_changes = (group["loc_delta"] != 0).sum()
         churn_rate = loc_changes / n_commits
         
-        # Mean absolute deltas (magnitude of changes)
+        # When it does change, how big are the changes on average?
         mean_abs_loc_delta = group["loc_delta"].abs().mean()
         mean_abs_cc_delta = group["cc_delta"].abs().mean()
         mean_abs_imports_delta = group["imports_delta"].abs().mean()
         mean_abs_func_delta = group["func_delta"].abs().mean()
         
-        # ------------------------------------------------------------------
-        # B. STABILITY / VOLATILITY FEATURES
-        # ------------------------------------------------------------------
+        # --- Are the metrics stable or bouncing around? ---
         
         std_cc_after = group["cc_after"].std()
         std_imports_after = group["imports_after"].std()
         std_mi_after = group["mi_after"].std()
         
-        # ------------------------------------------------------------------
-        # C. DIRECTIONAL TRENDS (linear regression slopes)
-        # ------------------------------------------------------------------
+        # --- Which direction are things heading over time? ---
         
         cc_trend = compute_linear_trend(group["cc_after"])
         mi_trend = compute_linear_trend(group["mi_after"])
         imports_trend = compute_linear_trend(group["imports_after"])
         
-        # ------------------------------------------------------------------
-        # D. STRUCTURAL LOAD (absolute levels)
-        # ------------------------------------------------------------------
+        # --- What's the typical complexity level? ---
         
         mean_cc_after = group["cc_after"].mean()
+        mean_mi_after = group["mi_after"].mean()  # higher = more maintainable
         mean_imports_after = group["imports_after"].mean()
         mean_func_after = group["func_after"].mean()
         
-        # ------------------------------------------------------------------
-        # E. RECENT WINDOW FEATURES
-        # ------------------------------------------------------------------
+        # --- Now the same questions but just for recent commits ---
+        # This lets us catch files that WERE stable but are now degrading
         
-        # Get recent commits (last N)
         recent = group.tail(recent_window) if len(group) >= recent_window else group
         
-        # Recent trends (using same linear regression approach)
         recent_cc_trend = compute_linear_trend(recent["cc_after"])
         recent_mi_trend = compute_linear_trend(recent["mi_after"])
         recent_imports_trend = compute_linear_trend(recent["imports_after"])
         
-        # Recent volatility
         recent_cc_volatility = recent["cc_after"].std()
         recent_imports_volatility = recent["imports_after"].std()
         
-        # ------------------------------------------------------------------
-        # BUILD FEATURE RECORD
-        # ------------------------------------------------------------------
+        # --- Pack it all into a record ---
         
         record = {
             "repo_name": repo_name,
@@ -332,6 +310,7 @@ def compute_file_features(
             "imports_trend": imports_trend,
             # Structural
             "mean_cc_after": mean_cc_after,
+            "mean_mi_after": mean_mi_after,
             "mean_imports_after": mean_imports_after,
             "mean_func_after": mean_func_after,
             # Recent
@@ -355,23 +334,16 @@ def compute_file_features(
 
 
 # =============================================================================
-# STEP 3: NORMALIZATION
+# STEP 3: NORMALIZE SO BIG NUMBERS DON'T DOMINATE
 # =============================================================================
 
 def normalize_features(features_df: pd.DataFrame) -> Tuple[np.ndarray, StandardScaler]:
     """
-    Normalize feature vectors using StandardScaler.
+    StandardScaler: subtract mean, divide by std for each feature.
     
-    This ensures features with different magnitudes do not dominate
-    the distance calculations in clustering and anomaly detection.
-    
-    Args:
-        features_df: DataFrame from compute_file_features()
-        
-    Returns:
-        Tuple of:
-        - Normalized feature matrix (n_files x n_features)
-        - Fitted StandardScaler (for inverse transform if needed)
+    Why? Because LOC delta might be in hundreds while CC is like 3-5.
+    Without normalization, LOC would dominate all the distance calculations
+    and CC would basically be ignored. Not what we want.
     """
     print("Normalizing features with StandardScaler...")
     
@@ -390,23 +362,19 @@ def normalize_features(features_df: pd.DataFrame) -> Tuple[np.ndarray, StandardS
 
 
 # =============================================================================
-# STEP 4a: CLUSTERING
+# STEP 4a: GROUP SIMILAR FILES TOGETHER
 # =============================================================================
 
 def run_clustering(X_normalized: np.ndarray) -> Tuple[np.ndarray, int, KMeans]:
     """
-    Cluster files using KMeans with automatic k selection.
+    KMeans clustering to find files that evolve similarly.
     
-    Selects optimal k by maximizing silhouette score over range [K_MIN, K_MAX].
+    We don't know how many clusters there should be, so we try k=3 to k=10
+    and pick whichever gives the best silhouette score (higher = better
+    separated clusters).
     
-    Args:
-        X_normalized: Normalized feature matrix
-        
-    Returns:
-        Tuple of:
-        - Cluster labels (n_files,)
-        - Optimal k value
-        - Fitted KMeans model
+    The idea is: maybe there's a group of "stable core files", a group of
+    "frequently refactored files", etc. Clustering finds these groups.
     """
     print(f"Running KMeans clustering (k={K_MIN}-{K_MAX})...")
     
@@ -448,21 +416,23 @@ def run_clustering(X_normalized: np.ndarray) -> Tuple[np.ndarray, int, KMeans]:
 
 
 # =============================================================================
-# STEP 4b: ANOMALY DETECTION
+# STEP 4b: FIND THE WEIRD FILES
 # =============================================================================
 
 def run_anomaly_detection(X_normalized: np.ndarray) -> np.ndarray:
     """
-    Detect anomalous files using Isolation Forest.
+    Isolation Forest to find files with unusual evolution patterns.
     
-    Returns anomaly scores where higher (less negative) = more anomalous.
-    Scores are normalized to [0, 1] range for interpretability.
+    The algorithm basically asks: how easy is it to isolate this point?
+    Normal files cluster together and take many splits to isolate.
+    Weird files are easy to separate = high anomaly score.
     
-    Args:
-        X_normalized: Normalized feature matrix
-        
-    Returns:
-        Anomaly scores (n_files,) in range [0, 1]
+    Output is normalized to 0-1 where 1 = "this file is WEIRD".
+    
+    Examples of what might score high:
+    - File that oscillates between two completely different states
+    - File with extremely high churn compared to peers
+    - File with unusual combination of stable LOC but volatile complexity
     """
     print("Running Isolation Forest anomaly detection...")
     
@@ -496,11 +466,14 @@ def run_anomaly_detection(X_normalized: np.ndarray) -> np.ndarray:
 
 
 # =============================================================================
-# STEP 5: RULE-BASED INTERPRETATION
+# STEP 5: TURN NUMBERS INTO HUMAN-READABLE LABELS
 # =============================================================================
 
+# These are simple threshold-based rules - no ML, just if/else.
+# The thresholds are defined at the top of the file so they're easy to tune.
+
 def classify_churn(churn_rate: float) -> str:
-    """Classify churn rate into categorical label."""
+    """low/moderate/high based on what fraction of commits change the file"""
     if churn_rate <= CHURN_THRESHOLDS[0]:
         return "low"
     elif churn_rate <= CHURN_THRESHOLDS[1]:
@@ -510,7 +483,7 @@ def classify_churn(churn_rate: float) -> str:
 
 
 def classify_trend(trend_value: float, threshold: float) -> str:
-    """Classify trend into directional label."""
+    """Is the metric going up, down, or staying flat?"""
     if trend_value < -threshold:
         return "decreasing"
     elif trend_value > threshold:
@@ -520,7 +493,7 @@ def classify_trend(trend_value: float, threshold: float) -> str:
 
 
 def classify_volatility(std_value: float) -> str:
-    """Classify volatility into categorical label."""
+    """Is the metric stable or bouncing around?"""
     if std_value <= VOLATILITY_THRESHOLD:
         return "stable"
     else:
@@ -529,10 +502,11 @@ def classify_volatility(std_value: float) -> str:
 
 def compare_recent_to_historical(recent: float, historical: float) -> str:
     """
-    Compare recent metric to historical.
+    Is the file getting better or worse lately compared to its history?
     
-    For trends: positive trend = complexity increasing = regressing
-    For volatility: higher = regressing
+    "improving" = recent trend is better (lower complexity, higher MI, etc)
+    "regressing" = recent trend is worse
+    "unchanged" = about the same
     """
     if historical == 0:
         if recent == 0:
@@ -551,15 +525,14 @@ def compare_recent_to_historical(recent: float, historical: float) -> str:
 
 def apply_rule_labels(features_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Apply rule-based labels to feature values.
+    Take all the numeric features and add human-readable labels.
     
-    Adds categorical columns based on transparent thresholds.
+    After this, each file has labels like:
+    - churn_label: "high" 
+    - cc_trend_label: "increasing"
+    - recent_cc_trend_vs_historical: "regressing"
     
-    Args:
-        features_df: DataFrame with computed features
-        
-    Returns:
-        DataFrame with additional label columns
+    These are what the LLM will use to generate explanations.
     """
     print("Applying rule-based labels...")
     
@@ -610,15 +583,12 @@ def apply_rule_labels(features_df: pd.DataFrame) -> pd.DataFrame:
 
 def derive_cluster_label(cluster_stats: Dict[str, float]) -> str:
     """
-    Derive a descriptive label for a cluster based on its aggregate stats.
+    Give each cluster a human-readable name based on its characteristics.
     
-    Uses a decision tree approach based on dominant characteristics.
-    
-    Args:
-        cluster_stats: Dictionary of average feature values for cluster
-        
-    Returns:
-        Short descriptive label (e.g., "high churn, bounded complexity")
+    Examples:
+    - "high churn, stable complexity" = actively developed but well-maintained
+    - "low churn, growing complexity" = neglected and rotting
+    - "moderate churn, declining complexity, high volatility" = being refactored
     """
     parts = []
     
@@ -654,15 +624,12 @@ def summarize_clusters(
     n_clusters: int
 ) -> List[Dict[str, Any]]:
     """
-    Generate summary statistics for each cluster.
+    For each cluster, compute aggregate stats and give it a label.
     
-    Args:
-        features_df: DataFrame with features and rule labels
-        cluster_labels: Cluster assignments
-        n_clusters: Number of clusters
-        
-    Returns:
-        List of cluster summary dictionaries
+    This helps understand what each cluster represents:
+    - How many files are in it?
+    - What's the average churn/complexity/etc?
+    - What's the distribution of labels within the cluster?
     """
     print(f"Summarizing {n_clusters} clusters...")
     
@@ -680,14 +647,15 @@ def summarize_clusters(
             "avg_churn_rate": float(cluster_df["churn_rate"].mean()),
             "avg_cc_after": float(cluster_df["mean_cc_after"].mean()),
             "avg_cc_trend": float(cluster_df["cc_trend"].mean()),
-            "avg_mi_after": float(cluster_df["mean_cc_after"].mean()),
+            "avg_mi_after": float(cluster_df["mean_mi_after"].mean()),
             "avg_mi_trend": float(cluster_df["mi_trend"].mean()),
+            "avg_mi_volatility": float(cluster_df["std_mi_after"].mean()),
             "avg_imports_after": float(cluster_df["mean_imports_after"].mean()),
             "avg_imports_trend": float(cluster_df["imports_trend"].mean()),
             "avg_std_cc_after": float(cluster_df["std_cc_after"].mean()),
             "avg_std_imports_after": float(cluster_df["std_imports_after"].mean()),
             "avg_func_after": float(cluster_df["mean_func_after"].mean()),
-            # Distribution of labels
+            # What labels are in this cluster?
             "churn_label_distribution": cluster_df["churn_label"].value_counts().to_dict(),
             "cc_trend_label_distribution": cluster_df["cc_trend_label"].value_counts().to_dict(),
         }
@@ -702,7 +670,7 @@ def summarize_clusters(
 
 
 # =============================================================================
-# STEP 6: OUTPUT GENERATION
+# STEP 6: PACKAGE EVERYTHING INTO JSON
 # =============================================================================
 
 def build_file_output(
@@ -711,15 +679,15 @@ def build_file_output(
     anomaly_scores: np.ndarray
 ) -> List[Dict[str, Any]]:
     """
-    Build per-file output dictionaries.
+    Build the final per-file output that gets written to JSON.
     
-    Args:
-        features_df: DataFrame with features and labels
-        cluster_labels: Cluster assignments
-        anomaly_scores: Anomaly scores
-        
-    Returns:
-        List of file analysis dictionaries
+    Each file gets a nice structured object with:
+    - Identifiers (repo, path, commit count)
+    - ML results (cluster, anomaly score)
+    - Labels (churn, trends, volatility)
+    - Raw numbers (for verification/debugging)
+    
+    This is what the LLM explanation layer will consume.
     """
     outputs = []
     
@@ -777,6 +745,7 @@ def build_file_output(
                 "churn_rate": float(round(row["churn_rate"], 4)),
                 "mean_abs_loc_delta": float(round(row["mean_abs_loc_delta"], 4)),
                 "mean_cc_after": float(round(row["mean_cc_after"], 4)),
+                "mean_mi_after": float(round(row["mean_mi_after"], 4)),
                 "mean_imports_after": float(round(row["mean_imports_after"], 4)),
                 "mean_func_after": float(round(row["mean_func_after"], 4)),
                 "std_cc_after": float(round(row["std_cc_after"], 4)),
@@ -796,13 +765,11 @@ def export_results(
     output_cluster_summary: Path = OUTPUT_CLUSTER_SUMMARY
 ) -> None:
     """
-    Export results to JSON files.
+    Write everything to JSON files in the data/ folder.
     
-    Args:
-        file_outputs: Per-file analysis results
-        cluster_summaries: Per-cluster summaries
-        output_file_analysis: Path for file analysis JSON
-        output_cluster_summary: Path for cluster summary JSON
+    Two files:
+    - file_analysis.json: one entry per file with all the details
+    - cluster_summary.json: one entry per cluster with aggregate stats
     """
     print(f"Exporting results...")
     
@@ -818,7 +785,7 @@ def export_results(
 
 
 # =============================================================================
-# MAIN ORCHESTRATION
+# RUN THE WHOLE THING
 # =============================================================================
 
 def main(
@@ -826,61 +793,64 @@ def main(
     recent_window: int = RECENT_WINDOW_DEFAULT
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Run the complete ML pipeline.
+    Run the full pipeline from raw data to JSON output.
     
-    Args:
-        min_commits: Minimum commits per file to include
-        recent_window: Number of recent commits for window features
-        
-    Returns:
-        Tuple of (file_outputs, cluster_summaries)
+    Steps:
+    1. Load data, group by file
+    2. Compute features for each file
+    3. Normalize (so clustering works properly)
+    4. Cluster + anomaly detection
+    5. Apply rule-based labels
+    6. Export to JSON
+    
+    Returns the outputs so you can also use this programmatically.
     """
     print("=" * 60)
     print("ML Pipeline for Temporal Code Evolution Analysis")
     print("=" * 60)
-    print(f"Parameters: min_commits={min_commits}, recent_window={recent_window}")
+    print(f"Config: min_commits={min_commits}, recent_window={recent_window}")
     print()
     
-    # Step 1: Load and prepare data
+    # Load everything and group by file
     merged_df, file_groups = load_and_prepare_data(min_commits=min_commits)
     
     if len(file_groups) == 0:
-        print("\nNo files with sufficient commit history. Exiting.")
+        print("\nNo files have enough commits to analyze. Try lowering --min-commits?")
         return [], []
     
     print()
     
-    # Step 2: Feature engineering
+    # Turn commit history into feature vectors
     features_df = compute_file_features(file_groups, recent_window=recent_window)
     print()
     
-    # Step 3: Normalization
+    # Normalize so clustering doesn't get dominated by big numbers
     X_normalized, scaler = normalize_features(features_df)
     print()
     
-    # Step 4a: Clustering
+    # Find groups of similar files
     cluster_labels, n_clusters, kmeans_model = run_clustering(X_normalized)
     print()
     
-    # Step 4b: Anomaly detection
+    # Flag the weird ones
     anomaly_scores = run_anomaly_detection(X_normalized)
     print()
     
-    # Step 5: Rule-based labels
+    # Turn numbers into words
     labeled_df = apply_rule_labels(features_df)
     print()
     
-    # Step 5b: Cluster summaries
+    # Summarize what each cluster looks like
     cluster_summaries = summarize_clusters(labeled_df, cluster_labels, n_clusters)
     print()
     
-    # Step 6: Build and export outputs
+    # Package it all up and write to JSON
     file_outputs = build_file_output(labeled_df, cluster_labels, anomaly_scores)
     export_results(file_outputs, cluster_summaries)
     
     print()
     print("=" * 60)
-    print("Pipeline complete!")
+    print("Done! Check data/file_analysis.json and data/cluster_summary.json")
     print("=" * 60)
     
     return file_outputs, cluster_summaries
