@@ -90,7 +90,7 @@ python scripts/ml_pipeline.py
 - Applies rule-based labels (high/low churn, increasing/stable complexity, etc.)
 - Outputs to `data/file_analysis.json` and `data/cluster_summary.json`
 
-Optional parameters:
+Optional parameters: (exists if needed probably wont be used much lol)
 ```powershell
 python scripts/ml_pipeline.py --min-commits 10 --recent-window 15
 ```

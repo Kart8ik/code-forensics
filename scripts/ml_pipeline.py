@@ -252,6 +252,7 @@ def compute_file_features(
         churn_rate = loc_changes / n_commits
         
         # When it does change, how big are the changes on average?
+        # (MI delta skipped - it's a composite of LOC/CC so would be redundant)
         mean_abs_loc_delta = group["loc_delta"].abs().mean()
         mean_abs_cc_delta = group["cc_delta"].abs().mean()
         mean_abs_imports_delta = group["imports_delta"].abs().mean()
@@ -287,6 +288,7 @@ def compute_file_features(
         
         recent_cc_volatility = recent["cc_after"].std()
         recent_imports_volatility = recent["imports_after"].std()
+        # (recent_mi_volatility skipped - MI is derived from CC/LOC, would be redundant)
         
         # --- Pack it all into a record ---
         
@@ -354,6 +356,7 @@ def normalize_features(features_df: pd.DataFrame) -> Tuple[np.ndarray, StandardS
     scaler = StandardScaler()
     X_normalized = scaler.fit_transform(X)
     
+    # sanity prints to verify working
     print(f"  Input shape: {X.shape}")
     print(f"  Normalized feature means near 0: {np.abs(X_normalized.mean(axis=0)).max():.6f}")
     print(f"  Normalized feature stds near 1: {np.abs(X_normalized.std(axis=0) - 1).max():.6f}")
