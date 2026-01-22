@@ -1,38 +1,184 @@
 """
-LLM Pipeline for Code Forensics - WITH FAISS RAG
-100% Architecture Compliant Version
+LLM Pipeline for Code Forensics - Neuro-Symbolic Architecture
+Two-stage explanatory system with grounded interpretation
+
+Architectural Constraints:
+- LLM acts ONLY as an explainer and synthesizer
+- LLM must NEVER recommend refactors, predict bugs/risks, assign severity, or introduce new labels
+- Stage 1: File-level explanation (N API calls) using windowed diffs
+- Stage 2: Repository-level synthesis (1 API call) using only Stage 1 outputs
+
+Epistemic Boundaries:
+- ML = detection of patterns (WHAT)
+- Diffs = evidence anchors (WHERE)
+- LLM = interpretation only (HOW / WHY)
 """
 
 import json
-import csv
+import re
+import logging
 from pathlib import Path
-from typing import Dict, List, Any
-from collections import defaultdict
+from typing import Dict, List, Any, Optional, Set
 import os
+from dotenv import load_dotenv
 from groq import Groq
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+OUTPUT_DIR = BASE_DIR / "output"
 
-# Import FAISS retriever (assumes faiss_rag.py is in same directory)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Import FAISS retriever
 try:
     from faiss_rag import FAISSContextRetriever
     FAISS_AVAILABLE = True
 except ImportError:
     FAISS_AVAILABLE = False
-    print("⚠️  FAISS module not found - will fall back to direct loading")
+    logger.warning("FAISS module not found - windowed diff retrieval unavailable")
+
+# Configurable top-K for file selection
+DEFAULT_TOP_K = 10
+
+
+def select_top_k_files(
+    file_analysis: List[Dict],
+    criterion: str = "anomaly_score",
+    k: int = DEFAULT_TOP_K
+) -> List[Dict]:
+    """
+    Select top-K files based on a criterion (attention mechanism).
+    
+    Only anomalous/atypical files are explained to focus LLM resources.
+    
+    Args:
+        file_analysis: List of file analysis dicts from file_analysis.json
+        criterion: Field to sort by (default: anomaly_score)
+        k: Number of files to select
+    
+    Returns:
+        Top-K files sorted by criterion (descending)
+    """
+    return sorted(
+        file_analysis,
+        key=lambda x: x.get(criterion, 0),
+        reverse=True
+    )[:k]
+
+
+def strip_ungrounded_commits(explanation: str, valid_commits: List[str]) -> str:
+    """
+    Remove any commit hash references not in valid_commits list.
+    
+    This ensures grounding: if an explanation references a commit hash,
+    it must exist in the retrieved diff list.
+    
+    Args:
+        explanation: LLM-generated explanation text
+        valid_commits: List of commit hashes that were actually retrieved
+    
+    Returns:
+        Explanation with ungrounded commit references removed
+    """
+    if not valid_commits:
+        return explanation
+    
+    # Create set of valid short and full hashes
+    valid_set: Set[str] = set()
+    for commit in valid_commits:
+        valid_set.add(commit)
+        valid_set.add(commit[:7])
+        valid_set.add(commit[:8])
+    
+    # Find all commit-like patterns (7-40 hex chars)
+    commit_pattern = r'\b([a-f0-9]{7,40})\b'
+    
+    def replace_if_ungrounded(match):
+        commit_ref = match.group(1)
+        # Check if this reference is grounded
+        if commit_ref in valid_set:
+            return commit_ref
+        # Check if any valid commit starts with this reference
+        for valid in valid_commits:
+            if valid.startswith(commit_ref) or commit_ref.startswith(valid[:7]):
+                return commit_ref
+        # Ungrounded - remove it
+        logger.warning(f"Stripped ungrounded commit reference: {commit_ref}")
+        return "[commit]"
+    
+    return re.sub(commit_pattern, replace_if_ungrounded, explanation)
+
+
+def extract_referenced_commits(explanation: str, valid_commits: List[str]) -> List[str]:
+    """
+    Extract commit hashes that are actually referenced in the explanation.
+    
+    Args:
+        explanation: LLM-generated explanation text
+        valid_commits: List of valid commit hashes
+    
+    Returns:
+        List of commit hashes referenced in the explanation
+    """
+    if not valid_commits:
+        return []
+    
+    referenced = []
+    commit_pattern = r'\b([a-f0-9]{7,40})\b'
+    
+    for match in re.finditer(commit_pattern, explanation):
+        commit_ref = match.group(1)
+        for valid in valid_commits:
+            if valid.startswith(commit_ref) or commit_ref.startswith(valid[:7]):
+                if valid not in referenced:
+                    referenced.append(valid)
+                break
+    
+    return referenced
 
 
 class CodeForensicsLLM:
-    def __init__(self, api_key: str = None, use_faiss: bool = True):
-        """Initialize with Groq API and optional FAISS"""
-        print("="*60)
-        print("Code Forensics LLM Pipeline")
-        print("Using LLaMA-3 70B via Groq API")
-        if use_faiss and FAISS_AVAILABLE:
-            print("WITH FAISS RAG LAYER ✨")
-        print("="*60)
+    """
+    Neuro-symbolic LLM pipeline for code evolution interpretation.
+    
+    The LLM is constrained to interpretation only:
+    - Characterize evolutionary trajectories
+    - Highlight metric/code discrepancies
+    - Never speculate beyond provided evidence
+    """
+    
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        use_faiss: bool = True,
+        top_k: int = DEFAULT_TOP_K,
+        temperature: float = 0.3
+    ):
+        """
+        Initialize with Groq API and FAISS retriever.
         
-        # Get API key
+        Args:
+            api_key: Groq API key (or from GROQ_API_KEY env var)
+            use_faiss: Whether to use FAISS for windowed diff retrieval
+            top_k: Number of top anomalous files to explain
+            temperature: LLM temperature (default 0.3 for determinism)
+        """
+        print("=" * 60)
+        print("Code Forensics LLM Pipeline")
+        print("Neuro-Symbolic Architecture")
+        print("=" * 60)
+        
+        # Configuration
+        self.top_k = top_k
+        self.temperature = temperature
+        
+        # Load .env and get API key
+        load_dotenv(BASE_DIR / ".env")
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         if not self.api_key:
             raise ValueError(
@@ -47,128 +193,112 @@ class CodeForensicsLLM:
         
         # Initialize FAISS retriever
         self.use_faiss = use_faiss and FAISS_AVAILABLE
+        self.retriever: Optional[FAISSContextRetriever] = None
+        
         if self.use_faiss:
-            print("\n✓ Initializing FAISS RAG layer...")
+            print("\n✓ Initializing FAISS RAG layer (diff-only)...")
             self.retriever = FAISSContextRetriever()
             try:
                 self.retriever.load_index()
                 print("✓ FAISS index loaded")
             except FileNotFoundError:
                 print("⚠️  FAISS index not found - run build_faiss_index() first")
-                print("   Falling back to direct loading")
                 self.use_faiss = False
         
-        print("\n✓ Groq API initialized")
+        print(f"\n✓ Groq API initialized")
         print(f"✓ Model: {self.model}")
-        print(f"✓ RAG Mode: {'ENABLED' if self.use_faiss else 'DISABLED (direct load)'}")
-        print("="*60 + "\n")
+        print(f"✓ Temperature: {self.temperature}")
+        print(f"✓ Top-K files: {self.top_k}")
+        print(f"✓ FAISS Mode: {'ENABLED (diff-only)' if self.use_faiss else 'DISABLED'}")
+        print("=" * 60 + "\n")
     
-    def load_data(self):
-        data_dir = DATA_DIR
+    def load_data(self) -> None:
+        """Load required data files."""
+        print("Loading data files from:", DATA_DIR.absolute())
+        print("-" * 60)
         
-        print("Loading data files from:", data_dir.absolute())
-        print("-"*60)
         required = [
-        data_dir / "file_analysis.json",
-        data_dir / "cluster_summary.json",
+            DATA_DIR / "file_analysis.json",
+            DATA_DIR / "cluster_summary.json",
         ]
         if self.use_faiss:
-            required.append(data_dir / "faiss.index")
-
+            required.append(DATA_DIR / "faiss.index")
+        
         missing = [p for p in required if not p.exists()]
         if missing:
             raise FileNotFoundError(
                 "Missing required files:\n" +
-                "\n".join(f"  • {p}" for p in missing)
+                "\n".join(f"  - {p}" for p in missing)
             )
+        
         # Load ML outputs
-        with open(data_dir / "file_analysis.json") as f:
+        with open(DATA_DIR / "file_analysis.json") as f:
             self.file_analysis = json.load(f)
         print(f"✓ file_analysis.json ({len(self.file_analysis)} files)")
         
         # Load cluster summary
-        with open(data_dir / "cluster_summary.json") as f:
+        with open(DATA_DIR / "cluster_summary.json") as f:
             cluster_data = json.load(f)
-            
+        
         # Convert list to dict if needed
         if isinstance(cluster_data, list):
             self.cluster_summary = {}
             for item in cluster_data:
                 cluster_id = item.get('cluster_id', item.get('id', 'unknown'))
                 self.cluster_summary[str(cluster_id)] = item
-            print(f"✓ cluster_summary.json ({len(self.cluster_summary)} clusters) [converted from list]")
+            print(f"✓ cluster_summary.json ({len(self.cluster_summary)} clusters)")
         else:
             self.cluster_summary = cluster_data
             print(f"✓ cluster_summary.json ({len(self.cluster_summary)} clusters)")
         
-        # Only load commits/diffs if NOT using FAISS
-        if not self.use_faiss:
-            # Load commits
-            self.commits = {}
-            with open(data_dir / "commits.csv") as f:
-                for row in csv.DictReader(f):
-                    self.commits[row['commit_hash']] = row
-            print(f"✓ commits.csv ({len(self.commits)} commits)")
-            
-            # Load diffs
-            self.diffs = {}
-            with open(data_dir / "diffs.csv") as f:
-                for row in csv.DictReader(f):
-                    key = (row['repo_name'], row['commit_hash'], row['file_path'])
-                    self.diffs[key] = row['diff_text']
-            print(f"✓ diffs.csv ({len(self.diffs)} diffs)")
-            
-            # Load file changes
-            self.file_changes = defaultdict(list)
-            with open(data_dir / "file_changes.csv") as f:
-                for row in csv.DictReader(f):
-                    self.file_changes[(row['repo_name'], row['file_path'])].append(row)
-            print(f"✓ file_changes.csv")
-        else:
-            print("✓ Using FAISS for context retrieval (commits/diffs indexed)")
-        
-        print("-"*60 + "\n")
+        print("-" * 60 + "\n")
     
-    def build_file_prompt_with_rag(self, file_data: Dict[str, Any]) -> str:
-        """Build prompt using FAISS-retrieved context"""
+    def build_file_prompt(self, file_data: Dict[str, Any], diffs: List[Dict]) -> str:
+        """
+        Build neutral, epistemic-boundary-respecting prompt for file explanation.
         
-        # Retrieve relevant context
-        contexts = self.retriever.retrieve_context(file_data, k=8)
+        Inputs per file:
+        - Structured ML JSON (file_analysis.json entry)
+        - Cluster ID (label only)
+        - 2-3 windowed diffs retrieved via FAISS
+        - No other context
         
-        # Separate by type
-        cluster_context = ""
-        diff_context = ""
-        metrics_context = ""
+        The prompt explicitly forbids:
+        - Recommendations
+        - Risk predictions
+        - Severity assignments
+        - Speculation beyond evidence
+        """
+        # Format diffs for prompt
+        diff_text = ""
+        if diffs:
+            for i, diff in enumerate(diffs, 1):
+                meta = diff['metadata']
+                diff_text += f"\n### Diff {i} (Commit: {meta['commit'][:8]})\n"
+                diff_text += f"```\n{diff['document'][:600]}\n```\n"
+        else:
+            diff_text = "No diffs available for this file."
         
-        for ctx in contexts:
-            ctx_type = ctx['metadata']['type']
-            similarity = ctx['similarity']
-            
-            # Only include highly relevant contexts (>0.3 similarity)
-            if similarity < 0.3:
-                continue
-            
-            if ctx_type == 'cluster':
-                cluster_context += f"\n{ctx['document']}\n"
-            elif ctx_type == 'diff':
-                diff_context += f"\n**Relevance: {similarity:.2f}**\n{ctx['document']}\n"
-            elif ctx_type == 'metrics':
-                metrics_context += f"\n{ctx['document']}\n"
+        # Get cluster label
+        cluster_id = str(file_data['cluster_id'])
+        cluster_info = self.cluster_summary.get(cluster_id, {})
+        cluster_label = cluster_info.get('derived_cluster_label', f'Cluster {cluster_id}')
         
-        # Build prompt
-        prompt = f"""Analyze the evolution of this source code file based on pre-computed metrics and retrieved relevant context.
+        prompt = f"""Characterize the evolutionary trajectory of this source code file based on the provided metric trends and code diffs.
 
-FILE: {file_data['file_path']}
-REPOSITORY: {file_data['repo_name']}
+## FILE INFORMATION
 
-## METRICS & ANALYSIS
+**File:** {file_data['file_path']}
+**Repository:** {file_data['repo_name']}
+**Cluster:** {cluster_label}
+
+## METRIC TRENDS (ML-Detected)
 
 **Evolution Summary:**
-- Total commits: {file_data['n_commits']}
-- Cluster: {file_data['cluster_id']}
-- Anomaly score: {file_data['anomaly_score']:.3f} (higher = more unusual patterns)
+- Total commits analyzed: {file_data['n_commits']}
+- Anomaly score: {file_data['anomaly_score']:.4f}
 
-**Labels (rule-based):**
+**Behavioral Labels (rule-based):**
 - Churn level: {file_data['churn_label']}
 - Complexity volatility: {file_data['cc_volatility_label']}
 - Import volatility: {file_data['imports_volatility_label']}
@@ -178,100 +308,57 @@ REPOSITORY: {file_data['repo_name']}
 - Maintainability index: {file_data['historical_trends']['mi']['label']} (slope: {file_data['historical_trends']['mi']['value']:.4f})
 - Imports: {file_data['historical_trends']['imports']['label']} (slope: {file_data['historical_trends']['imports']['value']:.4f})
 
-**Average Metrics:**
+**Raw Metrics:**
 - Churn rate: {file_data['raw_features']['churn_rate']:.1%}
 - Mean LOC delta: {file_data['raw_features']['mean_abs_loc_delta']:.1f}
-- Mean complexity: {file_data['raw_features']['mean_cc_after']:.2f} (±{file_data['raw_features']['std_cc_after']:.2f})
+- Mean complexity: {file_data['raw_features']['mean_cc_after']:.2f} (+/- {file_data['raw_features']['std_cc_after']:.2f})
 - Mean maintainability: {file_data['raw_features']['mean_mi_after']:.2f}
 
-## RELEVANT CLUSTER CONTEXT
-{cluster_context if cluster_context else "No highly relevant cluster context found."}
-
-## RELEVANT CODE CHANGES (Retrieved via RAG)
-{diff_context if diff_context else "No highly relevant diffs found."}
-
-## RELATED METRICS CONTEXT
-{metrics_context if metrics_context else "No related metrics context."}
+## CODE DIFFS (Evidence Anchors)
+{diff_text}
 
 ## YOUR TASK
 
-Provide a natural language explanation (3-5 paragraphs) that:
+Provide a characterization (3-4 paragraphs) that:
 
-1. **Interprets the metrics**: What do these numbers tell us about the file's health and evolution?
-2. **Explains the patterns**: Why might the file be changing this way? What development patterns are evident?
-3. **Identifies concerns**: Are there red flags? (e.g., high churn + rising complexity)
-4. **Grounds in evidence**: Reference the retrieved contexts and metrics where relevant
-5. **Provides recommendations**: What should developers do? Refactor? Add tests? Monitor closely?
+1. **Describes the evolutionary trajectory**: How has this file changed over time based on the metrics?
+2. **Interprets the patterns**: What do the metric trends suggest about how this file has been developed?
+3. **Grounds in evidence**: Reference specific commits and metric values where relevant.
+4. **Highlights discrepancies**: If the metrics and code changes appear contradictory, explicitly note this.
 
-Be specific, technical, and actionable. Focus on insights that would help engineering teams make decisions."""
-
-        return prompt
-    
-    def build_file_prompt_direct(self, file_data: Dict[str, Any]) -> str:
-        """Build prompt with direct data loading (fallback)"""
-        
-        repo_name = file_data['repo_name']
-        file_path = file_data['file_path']
-        
-        # Get recent diffs for context
-        changes = self.file_changes.get((repo_name, file_path), [])
-        recent_changes = ""
-        
-        for change in changes[:2]:  # Last 2 commits
-            commit_hash = change.get('commit_hash', '')
-            diff_key = (repo_name, commit_hash, file_path)
-            
-            if diff_key in self.diffs:
-                diff_text = self.diffs[diff_key]
-                if len(diff_text) > 800:
-                    diff_text = diff_text[:800] + "\n... (truncated)"
-                
-                commit_msg = self.commits.get(commit_hash, {}).get('message', 'N/A')
-                recent_changes += f"\nCommit {commit_hash[:7]}: {commit_msg[:100]}\n"
-                recent_changes += f"```diff\n{diff_text}\n```\n"
-        
-        prompt = f"""Analyze the evolution of this source code file based on pre-computed metrics and recent changes.
-
-FILE: {file_path}
-REPOSITORY: {repo_name}
-
-## METRICS & ANALYSIS
-
-**Evolution Summary:**
-- Total commits: {file_data['n_commits']}
-- Cluster: {file_data['cluster_id']}
-- Anomaly score: {file_data['anomaly_score']:.3f}
-
-**Labels (rule-based):**
-- Churn level: {file_data['churn_label']}
-- Complexity volatility: {file_data['cc_volatility_label']}
-- Import volatility: {file_data['imports_volatility_label']}
-
-**Historical Trends:**
-- Cyclomatic complexity: {file_data['historical_trends']['cc']['label']} (slope: {file_data['historical_trends']['cc']['value']:.4f})
-- Maintainability index: {file_data['historical_trends']['mi']['label']} (slope: {file_data['historical_trends']['mi']['value']:.4f})
-
-**Average Metrics:**
-- Churn rate: {file_data['raw_features']['churn_rate']:.1%}
-- Mean complexity: {file_data['raw_features']['mean_cc_after']:.2f}
-
-## RECENT CHANGES
-{recent_changes if recent_changes else "No recent changes available."}
-
-## YOUR TASK
-
-Provide a natural language explanation (3-5 paragraphs) that interprets these metrics and provides actionable insights."""
+**CONSTRAINTS (STRICTLY ENFORCED):**
+- Do NOT provide recommendations or suggest what developers should do
+- Do NOT predict risks, bugs, or future problems
+- Do NOT assign severity, priority, or urgency
+- Do NOT speculate beyond the provided evidence
+- Focus ONLY on characterizing WHAT the metrics show and WHY the code may have evolved this way"""
 
         return prompt
     
-    def generate_file_explanation(self, file_data: Dict[str, Any]) -> str:
-        """Generate explanation using Groq API with RAG"""
+    def generate_file_explanation(
+        self,
+        file_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generate grounded explanation for a single file.
         
-        # Build prompt (RAG or direct)
-        if self.use_faiss:
-            prompt = self.build_file_prompt_with_rag(file_data)
-        else:
-            prompt = self.build_file_prompt_direct(file_data)
+        Returns structured output with:
+        - repo, file, cluster, anomaly_score
+        - referenced_commits (grounded)
+        - explanation (with ungrounded refs stripped)
+        """
+        # Retrieve windowed diffs via FAISS
+        diffs = []
+        valid_commits = []
+        
+        if self.use_faiss and self.retriever:
+            diffs = self.retriever.retrieve_windowed_diffs(file_data, k=3)
+            valid_commits = [d['metadata']['commit'] for d in diffs]
+            logger.info(f"Retrieved {len(diffs)} diffs for {file_data['file_path']}")
+            logger.info(f"Commits: {[c[:8] for c in valid_commits]}")
+        
+        # Build prompt
+        prompt = self.build_file_prompt(file_data, diffs)
         
         try:
             response = self.client.chat.completions.create(
@@ -279,99 +366,132 @@ Provide a natural language explanation (3-5 paragraphs) that interprets these me
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a senior software architect analyzing code evolution patterns. Provide detailed, technical, and actionable insights based on metrics and code changes."
+                        "content": (
+                            "You are analyzing code evolution patterns. "
+                            "Your role is to interpret and explain, never to advise or predict. "
+                            "Describe what the data shows without making recommendations."
+                        )
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                temperature=0.7,
-                max_tokens=1500,
+                temperature=self.temperature,
+                max_tokens=1200,
                 top_p=0.9,
             )
             
-            return response.choices[0].message.content.strip()
+            explanation = response.choices[0].message.content.strip()
+            
+            # Grounding check: strip ungrounded commit references
+            explanation = strip_ungrounded_commits(explanation, valid_commits)
+            
+            # Extract actually referenced commits
+            referenced = extract_referenced_commits(explanation, valid_commits)
+            
+            # Log the mapping
+            logger.info(f"File: {file_data['file_path']}")
+            logger.info(f"Commits retrieved: {valid_commits}")
+            logger.info(f"Commits referenced: {referenced}")
+            
+            return {
+                "repo": file_data['repo_name'],
+                "file": file_data['file_path'],
+                "cluster": str(file_data['cluster_id']),
+                "anomaly_score": file_data['anomaly_score'],
+                "referenced_commits": referenced,
+                "explanation": explanation
+            }
             
         except Exception as e:
-            print(f"      ✗ API Error: {e}")
-            return f"Error generating explanation: {e}"
+            logger.error(f"API Error for {file_data['file_path']}: {e}")
+            return {
+                "repo": file_data['repo_name'],
+                "file": file_data['file_path'],
+                "cluster": str(file_data['cluster_id']),
+                "anomaly_score": file_data['anomaly_score'],
+                "referenced_commits": [],
+                "explanation": f"Error generating explanation: {e}"
+            }
     
-    def build_repo_prompt(self, file_explanations: List[Dict[str, Any]]) -> str:
-        """Build repository-level report prompt"""
+    def build_repo_synthesis_prompt(
+        self,
+        file_explanations: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build repository-level synthesis prompt.
         
+        Inputs (ONLY these, no FAISS, no raw diffs):
+        - cluster_summary.json
+        - file_explanations.json (Stage 1 outputs)
+        
+        The prompt explicitly forbids advice language.
+        """
         # Cluster overview
-        cluster_text = "## CLUSTER PATTERNS\n\n"
+        cluster_text = "## CLUSTER CHARACTERISTICS\n\n"
         for cluster_id, cluster_info in self.cluster_summary.items():
-            cluster_text += f"""**Cluster {cluster_id}: {cluster_info.get('description', 'N/A')}**
+            cluster_text += f"""**Cluster {cluster_id}:** {cluster_info.get('derived_cluster_label', 'N/A')}
 - Size: {cluster_info.get('size', 0)} files
-- Avg churn: {cluster_info.get('avg_churn_rate', 0):.1%}
-- Avg complexity: {cluster_info.get('avg_complexity', 0):.1f}
-- Avg anomaly: {cluster_info.get('avg_anomaly_score', 0):.3f}
+- Avg churn rate: {cluster_info.get('avg_churn_rate', 0):.1%}
+- Avg complexity: {cluster_info.get('avg_cc_after', 0):.2f}
+- Churn distribution: {cluster_info.get('churn_label_distribution', {})}
+- Complexity trend distribution: {cluster_info.get('cc_trend_label_distribution', {})}
 
 """
         
-        # Top anomalous files
-        sorted_files = sorted(
-            file_explanations,
-            key=lambda x: x['file_analysis']['anomaly_score'],
-            reverse=True
-        )
-        
-        top_files = "\n## TOP ANOMALOUS FILES\n\n"
-        for i, item in enumerate(sorted_files[:5], 1):
-            top_files += f"""### {i}. {item['file_path']}
-**Anomaly Score:** {item['file_analysis']['anomaly_score']:.4f}
-**Cluster:** {item['file_analysis']['cluster_id']}
-**Churn:** {item['file_analysis']['churn_label']}
+        # File explanations summary
+        explanations_text = "## FILE-LEVEL EXPLANATIONS\n\n"
+        for item in file_explanations:
+            explanations_text += f"""### {item['file']}
+**Cluster:** {item['cluster']} | **Anomaly Score:** {item['anomaly_score']:.4f}
+**Referenced Commits:** {', '.join(c[:8] for c in item['referenced_commits']) if item['referenced_commits'] else 'None'}
 
-**Analysis:**
-{item['explanation'][:500]}...
+{item['explanation'][:800]}{'...' if len(item['explanation']) > 800 else ''}
 
 ---
 
 """
         
-        prompt = f"""Generate a comprehensive repository-level evolution report based on the analysis below.
+        prompt = f"""Synthesize the evolutionary patterns across this repository based on the cluster characteristics and file-level explanations below.
 
 {cluster_text}
 
-{top_files}
+{explanations_text}
 
 ## YOUR TASK
 
-Create a detailed executive report with the following sections:
+Create a repository-level synthesis (4-5 paragraphs) that:
 
-### 1. Executive Summary (3-4 paragraphs)
-- Overall codebase health assessment
-- Key evolutionary trends
-- Critical areas of concern
-- Strategic recommendations
+1. **Summarizes observed patterns**: What evolutionary patterns emerge across the explained files?
+2. **Relates to cluster behavior**: How do individual file trajectories relate to their cluster characteristics?
+3. **Describes repository evolution**: How has this repository evolved based on the evidence?
+4. **Highlights areas of atypical change**: Which files or clusters show unusual evolutionary patterns?
 
-### 2. Cluster Analysis
-For each cluster:
-- What characterizes files in this cluster?
-- What are the dominant patterns?
-- Is this cluster healthy or concerning?
+**LANGUAGE CONSTRAINTS (STRICTLY ENFORCED):**
+- Use "observed patterns" instead of "risks"
+- Use "evolutionary themes" instead of "concerns"
+- Use "areas of atypical change" instead of "problems"
+- Do NOT use: "recommend", "should", "must", "need to", "mitigation", "risk", "priority"
+- Do NOT provide action items or next steps
+- Focus ONLY on describing what the data shows
 
-### 3. Risk Assessment
-- Identify top 5 files that need immediate attention
-- Explain why they're risky
-- Provide specific mitigation strategies
-
-### 4. Recommendations
-- Short-term actions (next sprint)
-- Medium-term improvements (next quarter)
-- Long-term architectural considerations
-
-Make this actionable for engineering leadership. Be specific with file names, metrics, and concrete next steps."""
+This is an interpretive synthesis, not a prescriptive report."""
 
         return prompt
     
-    def generate_repo_report(self, file_explanations: List[Dict[str, Any]]) -> str:
-        """Generate repository-level report using Groq API"""
+    def generate_repo_synthesis(
+        self,
+        file_explanations: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Generate repository-level synthesis using ONLY Stage 1 outputs.
         
-        prompt = self.build_repo_prompt(file_explanations)
+        No FAISS retrieval.
+        No raw diffs.
+        No re-analysis.
+        """
+        prompt = self.build_repo_synthesis_prompt(file_explanations)
         
         try:
             response = self.client.chat.completions.create(
@@ -379,37 +499,64 @@ Make this actionable for engineering leadership. Be specific with file names, me
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a CTO analyzing a codebase evolution report. Provide strategic, actionable insights for engineering leadership."
+                        "content": (
+                            "You are synthesizing code evolution patterns across a repository. "
+                            "Describe observed patterns and evolutionary themes. "
+                            "Never provide recommendations, risk assessments, or action items."
+                        )
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                temperature=0.7,
-                max_tokens=3000,
+                temperature=self.temperature,
+                max_tokens=2000,
                 top_p=0.9,
             )
             
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            print(f"✗ API Error: {e}")
-            return f"Error generating report: {e}"
+            logger.error(f"API Error for repo synthesis: {e}")
+            return f"Error generating repository synthesis: {e}"
     
-    def run_pipeline(self, output_dir: str = "output", limit: int = None):
-        """Run complete pipeline"""
-        output_dir = Path(output_dir)
-        output_dir.mkdir(exist_ok=True)
+    def run_pipeline(self, output_dir: str = "output", limit: Optional[int] = None) -> None:
+        """
+        Run complete two-stage pipeline.
         
-        files = self.file_analysis[:limit] if limit else self.file_analysis
+        Stage 0: Select top-K anomalous files
+        Stage 1: Generate file-level explanations (N API calls)
+        Stage 2: Generate repository-level synthesis (1 API call)
+        """
+        output_path = Path(output_dir)
+        output_path.mkdir(exist_ok=True)
         
-        print("="*60)
-        print("LAYER 1: File-level Explanations")
+        # Stage 0: File selection (attention mechanism)
+        print("=" * 60)
+        print("STAGE 0: File Selection")
+        print("=" * 60)
+        
+        k = limit if limit else self.top_k
+        files = select_top_k_files(
+            self.file_analysis,
+            criterion="anomaly_score",
+            k=k
+        )
+        
+        print(f"Selected top {len(files)} files by anomaly_score:")
+        for i, f in enumerate(files[:5], 1):
+            print(f"  {i}. {f['file_path']} (score: {f['anomaly_score']:.4f})")
+        if len(files) > 5:
+            print(f"  ... and {len(files) - 5} more")
+        print("=" * 60 + "\n")
+        
+        # Stage 1: File-level explanations
+        print("=" * 60)
+        print("STAGE 1: File-level Explanations")
         print(f"Processing {len(files)} files")
-        if self.use_faiss:
-            print("Using FAISS RAG for context retrieval ✨")
-        print("="*60 + "\n")
+        print(f"Temperature: {self.temperature}")
+        print("=" * 60 + "\n")
         
         file_explanations = []
         
@@ -417,128 +564,137 @@ Make this actionable for engineering leadership. Be specific with file names, me
             file_path = file_data['file_path']
             print(f"[{i}/{len(files)}] {file_path}")
             
-            try:
-                explanation = self.generate_file_explanation(file_data)
-                
-                file_explanations.append({
-                    'repo_name': file_data['repo_name'],
-                    'file_path': file_path,
-                    'cluster_id': file_data['cluster_id'],
-                    'file_analysis': file_data,
-                    'explanation': explanation
-                })
-                
-                print(f"           ✓ Generated ({len(explanation)} chars)\n")
-                
-                # Save checkpoint every 10 files
-                if i % 10 == 0:
-                    with open(output_dir / "checkpoint.json", 'w') as f:
-                        json.dump(file_explanations, f, indent=2)
-                    print(f"           💾 Checkpoint saved\n")
-                
-            except Exception as e:
-                print(f"           ✗ Error: {e}\n")
-                continue
+            result = self.generate_file_explanation(file_data)
+            file_explanations.append(result)
+            
+            print(f"           ✓ Generated ({len(result['explanation'])} chars)")
+            print(f"           Commits: {result['referenced_commits']}\n")
+            
+            # Save checkpoint every 5 files
+            if i % 5 == 0:
+                with open(output_path / "checkpoint.json", 'w') as f:
+                    json.dump(file_explanations, f, indent=2)
+                logger.info(f"Checkpoint saved at {i} files")
         
         # Save file explanations
-        with open(output_dir / "file_explanations.json", 'w') as f:
+        with open(output_path / "file_explanations.json", 'w') as f:
             json.dump(file_explanations, f, indent=2)
         
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"✓ Saved {len(file_explanations)} file explanations")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
         
-        # Generate repo report
-        print("="*60)
-        print("LAYER 2: Repository Report")
-        print("="*60 + "\n")
+        # Stage 2: Repository-level synthesis
+        print("=" * 60)
+        print("STAGE 2: Repository Synthesis")
+        print("Input: cluster_summary.json + file_explanations.json")
+        print("NO FAISS | NO raw diffs | NO re-analysis")
+        print("=" * 60 + "\n")
         
-        print("Generating repository-level report...")
-        repo_report = self.generate_repo_report(file_explanations)
+        print("Generating repository-level synthesis...")
+        repo_synthesis = self.generate_repo_synthesis(file_explanations)
         
         # Save report
-        with open(output_dir / "repository_report.md", 'w') as f:
-            f.write("# Repository Evolution Report\n\n")
-            f.write(repo_report)
+        with open(output_path / "repository_report.md", 'w') as f:
+            f.write("# Repository Evolution Synthesis\n\n")
+            f.write("*This report describes observed evolutionary patterns without recommendations or risk assessments.*\n\n")
+            f.write("---\n\n")
+            f.write(repo_synthesis)
         
-        with open(output_dir / "repository_report.json", 'w') as f:
+        with open(output_path / "repository_report.json", 'w') as f:
             json.dump({
-                'report': repo_report,
+                'synthesis': repo_synthesis,
                 'metadata': {
                     'files_analyzed': len(file_explanations),
                     'clusters': len(self.cluster_summary),
                     'model': self.model,
-                    'provider': 'Groq',
-                    'rag_enabled': self.use_faiss
+                    'temperature': self.temperature,
+                    'top_k': self.top_k,
+                    'architecture': 'neuro-symbolic'
                 }
             }, f, indent=2)
         
-        print(f"\n✓ Repository report saved\n")
+        print(f"\n✓ Repository synthesis saved\n")
         
-        print("="*60)
-        print("🎉 Pipeline Complete!")
-        print("="*60)
-        print(f"\nOutputs saved to: {output_dir.absolute()}")
+        print("=" * 60)
+        print("Pipeline Complete")
+        print("=" * 60)
+        print(f"\nOutputs saved to: {output_path.absolute()}")
         print("\nFiles created:")
-        print(f"  • file_explanations.json - {len(file_explanations)} analyses")
-        print(f"  • repository_report.md - Executive summary")
-        print(f"  • repository_report.json - Structured data")
-        if self.use_faiss:
-            print(f"  • RAG-enhanced with scoped context retrieval ✨")
-        print("="*60 + "\n")
+        print(f"  - file_explanations.json ({len(file_explanations)} explanations)")
+        print(f"  - repository_report.md (synthesis)")
+        print(f"  - repository_report.json (structured)")
+        print("\nArchitectural compliance:")
+        print("  - LLM acted as interpreter only (no advice)")
+        print("  - Stage 2 used only Stage 1 outputs")
+        print("  - All commit references are grounded")
+        print("=" * 60 + "\n")
 
 
 def main():
-    """Main entry point"""
+    """Main entry point."""
     import sys
     
-    print("\n" + "="*60)
-    print("CODE FORENSICS - LLM PIPELINE")
-    print("WITH FAISS RAG LAYER")
-    print("="*60 + "\n")
+    print("\n" + "=" * 60)
+    print("CODE FORENSICS - NEURO-SYMBOLIC PIPELINE")
+    print("LLM as interpreter, not advisor")
+    print("=" * 60 + "\n")
     
-    # Check for test mode
+    # Parse arguments
     test_mode = "--test" in sys.argv
-    limit = 5 if test_mode else None
+    
+    # Get top_k from args if provided
+    top_k = DEFAULT_TOP_K
+    for arg in sys.argv:
+        if arg.startswith("--top-k="):
+            try:
+                top_k = int(arg.split("=")[1])
+            except ValueError:
+                pass
     
     if test_mode:
-        print("🧪 TEST MODE: Processing only 5 files\n")
+        print(f"TEST MODE: Processing only {min(5, top_k)} files\n")
+        top_k = min(5, top_k)
     
     try:
-        # Initialize pipeline with FAISS
-        pipeline = CodeForensicsLLM(use_faiss=True)
+        # Initialize pipeline
+        pipeline = CodeForensicsLLM(
+            use_faiss=True,
+            top_k=top_k,
+            temperature=0.3
+        )
         
         # Load data
         pipeline.load_data()
         
         # Run pipeline
-        pipeline.run_pipeline(limit=limit)
+        pipeline.run_pipeline()
         
     except ValueError as e:
-        print(f"\n{'='*60}")
-        print("❌ CONFIGURATION ERROR")
-        print("="*60)
+        print(f"\n{'=' * 60}")
+        print("CONFIGURATION ERROR")
+        print("=" * 60)
         print(f"\n{e}\n")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
         
     except FileNotFoundError as e:
-        print(f"\n{'='*60}")
-        print("❌ MISSING FILES")
-        print("="*60)
+        print(f"\n{'=' * 60}")
+        print("MISSING FILES")
+        print("=" * 60)
         print("\nRequired files not found. Please ensure:")
-        print("  • data/file_analysis.json exists")
-        print("  • data/cluster_summary.json exists")
-        print("  • data/faiss.index exists (run build_faiss_index() first)")
-        print("="*60 + "\n")
+        print("  - data/file_analysis.json exists")
+        print("  - data/cluster_summary.json exists")
+        print("  - data/faiss.index exists (run faiss_rag.py first)")
+        print("=" * 60 + "\n")
         
     except Exception as e:
-        print(f"\n{'='*60}")
-        print("❌ ERROR")
-        print("="*60)
+        print(f"\n{'=' * 60}")
+        print("ERROR")
+        print("=" * 60)
         print(f"\n{e}\n")
         import traceback
         traceback.print_exc()
-        print("\n" + "="*60 + "\n")
+        print("\n" + "=" * 60 + "\n")
 
 
 if __name__ == "__main__":
