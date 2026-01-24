@@ -20,6 +20,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 import os
+from collections import defaultdict
 
 import numpy as np
 from scipy.stats import percentileofscore
@@ -223,6 +224,64 @@ class CodeForensicsLLM:
         top_percent = 100 - percentile
         return f"{percentile}th percentile (top {top_percent}% most atypical)"
 
+    def _collect_all_anomaly_scores(self, file_data_list: List[Dict]) -> None:
+        """Collect anomaly scores for percentile normalization."""
+        self.all_anomaly_scores = [f.get('anomaly_score', 0) for f in file_data_list]
+
+    def _prepare_interpretation_context(self, file_data: Dict, cluster_stats: Dict) -> Dict[str, Any]:
+        """
+        Deterministically contextualize ML outputs for explanation.
+        No learning, no thresholds beyond simple comparisons.
+        """
+        cluster_id = str(file_data['cluster_id'])
+        anomaly_score = file_data.get('anomaly_score', 0)
+
+        percentile = int(percentileofscore(self.all_anomaly_scores, anomaly_score))
+        top_percent = 100 - percentile
+
+        if top_percent <= 5:
+            anomaly_context = f"Top {top_percent}% most atypical (extreme outlier)"
+        elif top_percent <= 20:
+            anomaly_context = f"Top {top_percent}% most atypical"
+        else:
+            anomaly_context = f"{percentile}th percentile"
+
+        cluster_median_churn = cluster_stats.get(cluster_id, {}).get('median_churn', 0.0)
+        file_churn = file_data['raw_features']['churn_rate']
+        churn_ratio = (
+            file_churn / cluster_median_churn
+            if cluster_median_churn > 0 else 1.0
+        )
+
+        # Add semantic interpretation to prevent LLM contradictions
+        if churn_ratio < 0.8:
+            churn_interpretation = "lower than cluster median (more stable)"
+        elif churn_ratio < 1.2:
+            churn_interpretation = "similar to cluster median"
+        elif churn_ratio < 2.0:
+            churn_interpretation = "moderately higher than cluster median"
+        else:
+            churn_interpretation = "significantly higher than cluster median"
+
+        churn_comparison = f"{churn_ratio:.2f}× cluster median ({churn_interpretation})"
+
+        cluster_cc_slope = cluster_stats.get(cluster_id, {}).get('median_cc_slope', 0.0)
+        file_cc_slope = file_data['historical_trends']['cc']['value']
+
+        if abs(cluster_cc_slope) > 1e-3:
+            cc_ratio = round(abs(file_cc_slope / cluster_cc_slope), 2)
+            direction = "faster" if abs(file_cc_slope) > abs(cluster_cc_slope) else "slower"
+            complexity_context = f"{cc_ratio}x {direction} than cluster median"
+        else:
+            complexity_context = f"slope {file_cc_slope:.4f}"
+
+        return {
+            "anomaly_context": anomaly_context,
+            "churn_comparison": churn_comparison,
+            "complexity_comparison": complexity_context,
+            "n_commits": file_data.get("n_commits", 0)
+        }
+
     def _compute_key_signals(self, file_data: Dict, cluster_stats: Dict) -> Dict[str, str]:
         """Compute prioritized metrics for attention-directing."""
         cluster_id = str(file_data['cluster_id'])
@@ -231,7 +290,7 @@ class CodeForensicsLLM:
         # Churn comparison
         file_churn = file_data['raw_features']['churn_rate']
         churn_ratio = file_churn / cluster_median_churn if cluster_median_churn > 0 else 1.0
-        churn_vs_cluster = f"{churn_ratio:.1f}× cluster median"
+        churn_vs_cluster = f"{churn_ratio:.1f}x cluster median"
 
         # Complexity trend
         cc_slope = file_data['historical_trends']['cc']['value']
@@ -315,6 +374,67 @@ class CodeForensicsLLM:
             signals.append(f"- **{file_path}**: {signal}")
 
         return '\n'.join(signals)
+
+    def _build_component_summary(self, file_explanations: List[Dict[str, Any]]) -> str:
+        components: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+        for f in file_explanations:
+            path = f.get("file", "")
+            parts = path.split("/")
+            component = parts[1] if len(parts) > 1 else "root"
+            components[component].append(f)
+
+        lines = []
+        for comp, files in components.items():
+            avg_anomaly = sum(f.get("anomaly_score", 0) for f in files) / len(files)
+            clusters = {f.get("cluster") for f in files}
+            lines.append(
+                f"{comp}/: {len(files)} files, avg anomaly {avg_anomaly:.2f}, clusters {sorted(clusters)}"
+            )
+
+        return "\n".join(lines)
+
+    def compute_grounding_metrics(self, explanations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        total = len(explanations)
+        counters = {
+            "valid_commits": 0,
+            "quantified": 0,
+            "within_limit": 0,
+            "violations": 0
+        }
+
+        for e in explanations:
+            text = e.get("explanation", "")
+            val = e.get("validation", {})
+
+            if not val.get("violations"):
+                counters["valid_commits"] += 1
+
+            if "x" in text:
+                counters["quantified"] += 1
+
+            if val.get("word_count", 999) <= 250:
+                counters["within_limit"] += 1
+
+            if val.get("violations"):
+                counters["violations"] += 1
+
+        if total == 0:
+            return {
+                "commit_grounding_rate": 0,
+                "quantified_comparison_rate": 0,
+                "word_limit_compliance": 0,
+                "violation_rate": 0,
+                "total_files": 0
+            }
+
+        return {
+            "commit_grounding_rate": counters["valid_commits"] / total * 100,
+            "quantified_comparison_rate": counters["quantified"] / total * 100,
+            "word_limit_compliance": counters["within_limit"] / total * 100,
+            "violation_rate": counters["violations"] / total * 100,
+            "total_files": total
+        }
     
     def load_data(self) -> None:
         """Load required data files."""
@@ -345,17 +465,24 @@ class CodeForensicsLLM:
 
         # Precompute cluster churn medians for key signals
         churn_by_cluster: Dict[str, List[float]] = {}
+        cc_slope_by_cluster: Dict[str, List[float]] = {}
         for f in self.file_analysis:
             cluster_id = str(f.get('cluster_id'))
             churn_by_cluster.setdefault(cluster_id, []).append(
                 f.get('raw_features', {}).get('churn_rate', 0)
             )
+            cc_slope_by_cluster.setdefault(cluster_id, []).append(
+                f.get('historical_trends', {}).get('cc', {}).get('value', 0)
+            )
 
         self.cluster_stats = {}
         for cluster_id, churn_values in churn_by_cluster.items():
             median_churn = float(np.median(churn_values)) if churn_values else 0.0
+            cc_values = cc_slope_by_cluster.get(cluster_id, [])
+            median_cc_slope = float(np.median(cc_values)) if cc_values else 0.0
             self.cluster_stats[cluster_id] = {
-                'median_churn': median_churn
+                'median_churn': median_churn,
+                'median_cc_slope': median_cc_slope
             }
         
         # Load cluster summary
@@ -379,8 +506,7 @@ class CodeForensicsLLM:
         self,
         file_data: Dict[str, Any],
         diffs: List[Dict],
-        anomaly_context: str,
-        key_signals: Dict[str, str]
+        signals: Dict[str, Any]
     ) -> str:
         """
         Build attention-worthy prompt for file explanation.
@@ -396,54 +522,34 @@ class CodeForensicsLLM:
         else:
             diff_text = "No diffs available for this file."
 
+        # Determine if we should include commit evidence section
+        has_meaningful_diffs = len(diffs) > 0 and any(
+            len(d.get('document', '')) > 100 for d in diffs
+        )
+
+        if has_meaningful_diffs:
+            commit_section = """### Evidence from Code Changes
+- Cite 0-2 commits ONLY from the diffs shown above
+- Cite ONLY commits with concrete evidence of metric impact
+- If no commit clearly explains a metric trend, write: "Shown commits do not directly explain [metric] behavior"
+
+Example of GOOD citation:
+- Commit abc123d: Removed 3 nested if-statements, extracted 2 helper functions → explains complexity drop from 15 to 8 (47 percent reduction)
+
+Example of BAD citation:
+- Commit xyz789: Fixed merge conflicts → may have contributed to churn (too vague)"""
+        else:
+            commit_section = """### Evidence from Code Changes
+Insufficient commit context available for causal analysis."""
+
         # Get cluster label
         cluster_id = str(file_data['cluster_id'])
         cluster_info = self.cluster_summary.get(cluster_id, {})
         cluster_label = cluster_info.get('derived_cluster_label', f'Cluster {cluster_id}')
 
-        prompt = f"""Given the metrics and code diffs for a single file, explain why this file stands out compared to other files in the same repository.
+        prompt = f"""You are explaining why this specific file deserves developer attention based on its evolutionary behavior.
 
-Answer only this question:
-Why should a developer pay attention to this file?
-
-You are provided:
-- ML-detected metric trends (churn, complexity, volatility, anomaly score)
-- Cluster assignment (relative behavior group)
-- Retrieved code diffs (commit-level evidence)
-
-Use only this information.
-
-OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
-
-### Why This File Stands Out
-(1–2 sentences, plain English, no numbers)
-
-### Evidence from Metrics
-- Max 3 bullet points
-- Each bullet must compare this file to:
-  • other files in the repo, or
-  • files in its cluster
-
-### Evidence from Code Changes
-- Max 2 bullet points
-- Each bullet must reference a specific commit hash
-- Explain what changed and how it explains the metric behavior
-
-### What Makes This Unusual
-(1 sentence describing tension, deviation, or contradiction)
-
-HARD CONSTRAINTS:
-- Max 220 words total (will be validated)
-- Do NOT use: “has undergone”, “suggests that”, “appears to”, “development focused on”
-- Reference ONLY commits shown in diffs above
-- If no commit materially explains a metric trend, say so explicitly
-- Reference at most 2 commits, and only if they are provided
-- Do NOT use passive voice, hedging, or process narration
-- Do NOT give recommendations, predict risks, or assign severity
-- Do NOT restate cluster definitions
-- Each metric bullet MUST compare to cluster or repo average
-
-## FILE INFORMATION
+## CONTEXT
 
 **File:** {file_data['file_path']}
 **Repository:** {file_data['repo_name']}
@@ -451,19 +557,122 @@ HARD CONSTRAINTS:
 
 ## KEY SIGNALS (Use these first)
 
-**Anomaly Level:** {anomaly_context}
-**Churn vs Cluster:** {key_signals['churn_vs_cluster']}
-**Complexity Trend:** {key_signals['complexity_trend']}
+**Anomaly Level:** {signals['anomaly_context']}
+**Churn Rate:** {signals['churn_comparison']} 
+**Complexity Trend:** {file_data['historical_trends']['cc']['label']}, {signals['complexity_comparison']}
+**Commits Analyzed:** {signals['n_commits']}
 
 ## SUPPORTING CONTEXT (Use if relevant)
 
-- Total commits analyzed: {file_data['n_commits']}
-- Maintainability trend: {key_signals['maintainability_trend']}
-- Import volatility: {key_signals['import_volatility']}
-- Cluster assignment: {cluster_label}
+- Maintainability trend: {file_data['historical_trends']['mi']['label']}
+- Import volatility: {file_data.get('imports_volatility_label', 'N/A')}
+- Raw churn rate: {file_data['raw_features']['churn_rate']:.1%}
 
 ## CODE DIFFS (Evidence Anchors)
 {diff_text}
+
+---
+
+## INTERNAL ANALYSIS (Think through this first, do not output)
+
+Before generating your response, answer these internally:
+
+1. What is the MOST SPECIFIC unusual thing about this file?
+    - NOT: "unusual combination of metrics"
+    - YES: "changes frequently but simplifies" OR "grows complexity while reducing dependencies"
+
+2. What are the EXACT numerical comparisons?
+    - Calculate ratios from the signals above
+    - Every metric bullet needs a number
+
+3. Do the shown commits contain ANY of these concrete changes?
+    - Function/class additions or removals
+    - Control flow changes (if/switch/loop modifications)
+    - Dependency additions or removals
+    - If NO clear evidence, state it explicitly
+
+4. What is the tension or deviation in ONE sentence?
+    - Format: "X paired with Y is unusual because typical files show Z"
+
+---
+
+## BANNED OPENING PATTERNS (Do not use these)
+
+❌ "This file stands out due to its unusual combination of..."
+❌ "This file has a unique set of characteristics..."
+❌ "This file exhibits interesting patterns..."
+❌ "This file shows attention-worthy behavior..."
+❌ "This file warrants investigation because..."
+
+✅ REQUIRED OPENING PATTERN:
+
+Start with a SPECIFIC behavioral description:
+- "This file changes frequently but simplifies with each modification"
+- "This file accumulates complexity while shedding dependencies"
+- "This file remains stable despite being in a high-churn cluster"
+
+## OUTPUT FORMAT (STRICT - FOLLOW EXACTLY)
+
+### Why This File Stands Out
+Write 1-2 sentences in plain English explaining what makes this file attention-worthy.
+Do NOT use numbers or percentages here - save those for the next section.
+
+### Evidence from Metrics
+Provide exactly 3 bullet points. Each MUST:
+- Include a specific quantified comparison (e.g., "2.3x cluster median", "3x faster growth")
+- Compare this file to either its cluster or the repository average
+- Be concrete, not vague
+
+Example of GOOD bullets:
+- Churn rate is 2.8x cluster median while complexity drops 1.5x faster - unusual inverse relationship
+- Anomaly score places it in top 5% of repository - extreme outlier behavior
+- Complexity decreased from ~15 to ~8 across 12 commits - 47% reduction
+
+Example of BAD bullets:
+- This file has high churn (no comparison, no number)
+- Complexity is decreasing (no quantification)
+- Metrics show unusual patterns (too vague)
+
+{commit_section}
+
+### What Makes This Unusual
+Write exactly 1 sentence that:
+1. Names the specific pattern (e.g., "high churn + declining complexity")
+2. Explains what this pattern REFLECTS or IS CONSISTENT WITH (not what it "suggests" or "indicates")
+3. States why this differs from typical behavior
+
+Template: "[Pattern] reflects [interpretation], which differs from typical files that [normal behavior]"
+
+Examples:
+✅ "High churn paired with declining complexity reflects iterative simplification, which differs from typical high-activity files that accumulate complexity"
+✅ "Stable complexity despite 80% churn reflects maintenance-focused changes rather than feature development"
+✅ "Growing complexity with declining imports reflects logic consolidation, which differs from typical complexity growth that comes with new dependencies"
+
+❌ "This combination suggests the file is worth investigating" (too vague)
+❌ "High churn and low complexity indicate unusual patterns" (no interpretation)
+
+---
+
+## HARD CONSTRAINTS
+
+❌ FORBIDDEN:
+- Passive voice hedging ("has undergone", "has been modified", "has experienced")
+- Vague qualifiers ("significant", "substantial", "notable", "considerable")
+- Uncertainty markers ("suggests that", "appears to", "seems to indicate", "may have")
+- Process narration ("development focused on", "efforts were made to")
+- Recommendations ("should refactor", "needs attention", "consider")
+- Risk predictions ("likely to cause bugs", "potential issues")
+- Severity labels ("critical", "high risk", "problematic")
+
+✅ REQUIRED:
+- Active voice with specific numbers
+- Quantified comparisons in EVERY metric bullet
+- Commit citations ONLY when evidence is clear
+- Max 220 words total
+- Reference ONLY commits shown in diffs above
+
+If you cannot make a specific, quantified comparison, do not include that bullet.
+If commits don't explain metrics, explicitly say so - honesty over speculation.
 """
         return prompt
     
@@ -490,18 +699,14 @@ HARD CONSTRAINTS:
             logger.info(f"Retrieved {len(diffs)} diffs for {file_data['file_path']}")
             logger.info(f"Commits: {[c[:8] for c in valid_commits]}")
         
-        # Preprocessing: anomaly context + key signals
-        anomaly_context = self._contextualize_anomaly_score(
-            file_data.get('anomaly_score', 0),
-            getattr(self, 'all_anomaly_scores', [])
-        )
-        key_signals = self._compute_key_signals(
+        # Preprocessing: interpretation context
+        signals = self._prepare_interpretation_context(
             file_data,
             getattr(self, 'cluster_stats', {})
         )
 
         # Build prompt
-        prompt = self.build_file_prompt(file_data, diffs, anomaly_context, key_signals)
+        prompt = self.build_file_prompt(file_data, diffs, signals)
         
         try:
             response = self.client.chat.completions.create(
@@ -509,19 +714,56 @@ HARD CONSTRAINTS:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are a code evolution analyst writing for busy developers. "
-                            "Your role is to flag files that deserve attention based on historical behavior. "
-                            "Rules for language: "
-                            "- Avoid passive or hedging constructions (e.g., 'has been', 'appears', 'suggests') "
-                            "- Avoid vague intensifiers ('significant', 'substantial', 'notable') "
-                            "- Avoid process narration ('efforts were made', 'development focused on') "
-                            "Preferred style: "
-                            "- Active voice with specific comparisons ('2x higher than cluster average') "
-                            "- Concrete contrasts ('only file in cluster with rising complexity') "
-                            "- Evidence-backed statements citing commit hashes "
-                            "Never diagnose bugs, predict risk, or give recommendations."
-                        )
+                        "content": """You are a code evolution analyst writing for developers who need to prioritize attention.
+
+## Core Responsibility
+Describe what evolutionary patterns REFLECT or ARE CONSISTENT WITH, without claiming to know intent or predicting outcomes.
+
+## Language Rules
+
+FORBIDDEN phrases/patterns:
+- Passive hedging: "has been", "has undergone", "has experienced"
+- Uncertainty markers: "suggests that", "appears to", "seems to indicate", "may have"
+- Vague intensifiers: "significant", "substantial", "considerable", "notable"
+- Generic openers: "unusual combination", "unique characteristics", "interesting patterns"
+- Recommendations: "should", "needs", "requires", "recommend"
+- Risk language: "problematic", "concerning", "risky", "technical debt"
+
+REQUIRED patterns:
+- Active, specific descriptions: "changes 2.3× more than cluster median"
+- Interpretive framing: "reflects [pattern]" not "suggests [speculation]"
+- Concrete contrasts: "differs from typical files that..."
+- Causal connections: "explains [metric change]" when citing commits
+
+## Interpretive vs Speculative (Critical Distinction)
+
+✅ INTERPRETIVE (allowed):
+- "This pattern reflects iterative simplification"
+- "Behavior is consistent with maintenance-focused development"
+- "Differs from typical high-churn files that accumulate complexity"
+
+❌ SPECULATIVE (forbidden):
+- "Suggests the team is refactoring" (claims intent)
+- "Likely to cause bugs" (predicts outcomes)
+- "Indicates technical debt" (diagnoses problems)
+
+## Evidence Standards
+
+Every metric bullet MUST include:
+- A specific number (2.3×, 47%, top 5%)
+- A comparison (vs cluster, vs repository, vs typical)
+- Context (what this number means)
+
+Example: "Complexity decreased 47 percent over 8 months (slope: -0.095 vs cluster median +0.012) - only file showing decline while peers grow"
+
+Commit citations MUST:
+- Identify specific code change (what was modified)
+- Connect change to metric behavior (how it explains the number)
+- OR explicitly state "Shown commits do not explain [metric]"
+
+## Core Principle
+You describe patterns and what they reflect. You do not diagnose issues, predict risks, or recommend actions. Your outputs must be falsifiable using only the metrics and commits provided."""
+
                     },
                     {
                         "role": "user",
@@ -534,6 +776,27 @@ HARD CONSTRAINTS:
             )
             
             explanation = response.choices[0].message.content.strip()
+
+            # Post-process to remove banned patterns that slipped through
+            banned_replacements = {
+                "suggests that": "reflects",
+                "appears to": "shows",
+                "seems to indicate": "shows",
+                "may have": "likely",
+                "has undergone": "experienced",
+                "has been modified": "changed",
+                "unusual combination of": "combines",
+                "unique set of characteristics": "unique behavior",
+                "interesting patterns": "patterns",
+            }
+
+            explanation_lower = explanation.lower()
+            for banned, replacement in banned_replacements.items():
+                if banned in explanation_lower:
+                    # Find the actual case-sensitive occurrence
+                    pattern = re.compile(re.escape(banned), re.IGNORECASE)
+                    explanation = pattern.sub(replacement, explanation)
+                    logger.warning(f"Auto-replaced banned phrase: '{banned}' → '{replacement}'")
 
             # Validate output
             provided_commits = [d['metadata']['commit'] for d in diffs]
@@ -626,52 +889,102 @@ HARD CONSTRAINTS:
         
         The prompt explicitly forbids advice language.
         """
-        # Cluster overview
-        cluster_text = "## CLUSTER CHARACTERISTICS\n\n"
-        for cluster_id, cluster_info in self.cluster_summary.items():
-            cluster_text += f"""**Cluster {cluster_id}:** {cluster_info.get('derived_cluster_label', 'N/A')}
-- Size: {cluster_info.get('size', 0)} files
-- Avg churn rate: {cluster_info.get('avg_churn_rate', 0):.1%}
-- Avg complexity: {cluster_info.get('avg_cc_after', 0):.2f}
-- Churn distribution: {cluster_info.get('churn_label_distribution', {})}
-- Complexity trend distribution: {cluster_info.get('cc_trend_label_distribution', {})}
+        component_summary = self._build_component_summary(file_explanations)
+        file_attention_snippets = self._extract_attention_signals(file_explanations)
 
-"""
-        
-        # Compressed file-level signals
-        signals_text = "## FILE-LEVEL ATTENTION SIGNALS\n\n"
-        signals_text += self._extract_attention_signals(file_explanations)
-        
-        prompt = f"""Using the cluster summaries and file-level outputs, produce a repository-level synthesis that highlights where evolution concentrates and where it behaves unexpectedly.
+        prompt = f"""You are synthesizing cross-file evolutionary patterns for a repository.
 
-Do NOT restate file summaries verbatim.
+Your goal: Identify patterns that only become visible when comparing multiple files together.
 
-OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
+## COMPONENT BREAKDOWN
+{component_summary}
+
+## FILE ATTENTION SIGNALS
+(Only the "Why This File Stands Out" section from each file)
+
+{file_attention_snippets}
+
+---
+
+## OUTPUT FORMAT (STRICT)
 
 ### Dominant Evolutionary Modes
-- 2–3 labeled themes (e.g., “Refinement Zones”, “Complexity Accretion”)
-- Each label must be justified using metric relationships
+Identify 2-3 themes that describe RELATIONSHIPS between metrics or components.
+
+Each theme must:
+- Name a specific pattern (not just label files)
+- Include quantified evidence (percentages, ratios, file counts)
+- Explain what the relationship means
+
+✅ GOOD theme:
+"UI Simplification vs Data Complexity: 5 files in pages/*.tsx reducing complexity by avg 35% (slopes: -0.06 to -0.12) while 3 files in components/*.tsx growing complexity by avg 28% (slopes: +0.04 to +0.08). Creates architectural divergence - presentation layer simplifying while data handling becomes more tangled."
+
+❌ BAD themes:
+- "High Churn Files" (just a label, no relationship)
+- "Cluster 1 Behavior" (just renaming a cluster)
+- "Active Development Zone" (too generic, no specifics)
+- "Files undergoing significant changes" (vague, no numbers)
 
 ### Where Change Concentrates
-- Identify files or clusters that absorb a disproportionate share of churn or complexity change
+List specific files or directories with disproportionate activity.
+
+Include numbers:
+- "pages/Dashboard.tsx and components/TopNavbar.tsx absorb 45% of total commits despite being 12% of codebase"
+- "src/utils/ (8 files) accounts for 62% of high-anomaly files"
 
 ### Files That Defy Their Peers
-- Short list (2–4 files)
-- One-line explanation of how each deviates from its cluster
+List 2-4 files maximum. For each, write ONE LINE explaining how it deviates from its cluster or component.
 
-### What This Says About the Repository
-- 2-3 sentences max
-- No fluff, no repetition
+Format: `**filename**: deviation in one sentence`
 
-HARD CONSTRAINTS:
-- No recommendations, action items, or risk language
-- No repeating cluster definitions
-- Prefer contrasts over descriptions
-- If no cross-file insight exists, say so explicitly
+Example:
+- **src/App.tsx**: Only file in stable-complexity cluster showing 40% growth - contradicts cluster pattern
+- **pages/Login.tsx**: Churn rate 3.2x higher than other pages/ files while maintaining stable metrics
 
-{cluster_text}
+### What This Reveals
+Answer these 3 questions in 2-3 sentences total:
 
-{signals_text}
+1. **Architectural implication:** What does the pattern mean for code organization?
+    - Use "reflects" or "is consistent with" framing
+    - Example: "Reflects divergence between UI and data layers"
+   
+2. **Development pattern:** What does change concentration indicate?
+    - Example: "Consistent with hotspot development rather than distributed evolution"
+   
+3. **Non-obvious insight:** What becomes visible only by comparing files?
+    - Example: "ExampleChart becoming self-contained while other components remain modular - suggests different design philosophy"
+
+Do NOT:
+- Just restate the patterns listed above
+- Make recommendations ("should refactor")
+- Predict outcomes ("will cause issues")
+- Claim intent ("team is focusing on...")
+
+DO:
+- Connect patterns to architectural consequences
+- Use "reflects" or "consistent with" framing
+- Provide falsifiable interpretations
+
+---
+
+## CONSTRAINTS
+
+❌ FORBIDDEN:
+- Recommendations ("should refactor", "needs attention")
+- Risk language ("problematic", "concerning", "technical debt")
+- Generic labels without evidence
+- Restating individual file summaries verbatim
+- Vague statements without numbers
+
+✅ REQUIRED:
+- Every theme must describe a relationship, not label files
+- Include specific numbers (percentages, ratios, counts)
+- Cross-file comparisons (component A vs component B)
+- Concrete, falsifiable statements
+
+If you cannot identify a genuine cross-file pattern, say: "Files do not exhibit clear cross-component patterns - evolution is file-specific rather than architectural."
+
+Be honest. Be specific. Be concise.
 """
         return prompt
     
@@ -693,19 +1006,51 @@ HARD CONSTRAINTS:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are synthesizing cross-file evolution patterns for a repository. "
-                            "Your role is to surface attention-directing signals, not recommendations or risk assessments. "
-                            "Theme quality rules: "
-                            "GOOD themes: "
-                            "- Describe a relationship between metrics (e.g., 'high churn with declining complexity') "
-                            "- Explain how multiple files behave similarly "
-                            "BAD themes: "
-                            "- Restate a single metric ('High Complexity Files') "
-                            "- Rename clusters ('Cluster 0 Behavior') "
-                            "- Use generic labels ('Active Development', 'Maintenance Mode') "
-                            "Be concise and comparative."
-                        )
+                        "content": """You are synthesizing cross-file evolution patterns for a repository.
+
+## Core Responsibility
+Identify architectural and organizational patterns that emerge from comparing multiple files, using interpretive language that avoids speculation about intent or outcomes.
+
+## Language Requirements
+
+FORBIDDEN:
+- Intent claims: "team is focusing on", "developers are prioritizing"
+- Recommendations: "should", "needs to", "must", "consider"
+- Risk predictions: "will cause", "likely to", "may lead to"
+- Generic labels: "Active Development", "Maintenance Mode", "Legacy Code"
+- Speculation: "suggests", "indicates", "implies"
+
+REQUIRED:
+- Architectural framing: "reflects divergence", "consistent with concentration"
+- Comparative statements: "UI layer vs data layer", "component A differs from component B"
+- Quantified evidence: percentages, file counts, slope comparisons
+- Falsifiable claims: "5 files reducing complexity by avg 35%"
+
+## Theme Quality Standards
+
+GOOD theme structure:
+"[Component/Pattern name]: [Quantified observation] while [Contrasting observation]. Reflects [architectural consequence]."
+
+Example:
+"UI Simplification: 5 files in pages/*.tsx reducing complexity by avg 38% (slopes: -0.06 to -0.12) while 3 files in components/*.tsx growing by avg 28% (slopes: +0.04 to +0.08). Reflects architectural divergence where presentation simplifies as data handling complexifies."
+
+BAD themes to avoid:
+- "High Churn Files" (just a label)
+- "Active Development Zone" (generic)
+- "Cluster 1 Behavior" (restates ML output)
+
+## Synthesis Principle
+
+You are NOT summarizing individual files.
+You ARE identifying patterns that only become visible when viewing files together.
+
+Focus on:
+- Divergence (components evolving in opposite directions)
+- Concentration (change focused in specific areas)
+- Deviation (files behaving unlike their peers)
+- Architectural consequences (what patterns mean for structure)
+
+Never diagnose problems. Never recommend changes. Describe what patterns reflect about the codebase's evolutionary trajectory."""
                     },
                     {
                         "role": "user",
@@ -751,6 +1096,9 @@ HARD CONSTRAINTS:
         if len(files) > 5:
             print(f"  ... and {len(files) - 5} more")
         print("=" * 60 + "\n")
+
+        # Collect anomaly scores for percentile normalization
+        self._collect_all_anomaly_scores(self.file_analysis)
         
         # Stage 1: File-level explanations
         print("=" * 60)
@@ -780,6 +1128,11 @@ HARD CONSTRAINTS:
         # Save file explanations
         with open(output_path / "file_explanations.json", 'w') as f:
             json.dump(file_explanations, f, indent=2)
+
+        # Grounding & compliance metrics (for paper)
+        grounding_metrics = self.compute_grounding_metrics(file_explanations)
+        with open(output_path / "grounding_metrics.json", 'w') as f:
+            json.dump(grounding_metrics, f, indent=2)
         
         print(f"\n{'=' * 60}")
         print(f"✓ Saved {len(file_explanations)} file explanations")
@@ -811,7 +1164,8 @@ HARD CONSTRAINTS:
                     'model': self.model,
                     'temperature': self.temperature,
                     'top_k': self.top_k,
-                    'architecture': 'neuro-symbolic'
+                    'architecture': 'neuro-symbolic',
+                    'grounding_metrics': grounding_metrics
                 }
             }, f, indent=2)
         

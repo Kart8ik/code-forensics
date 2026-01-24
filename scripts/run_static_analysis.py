@@ -42,7 +42,7 @@ def git_checkout(repo_name, commit):
     
     repo = get_repo(repo_name)
     try:
-        repo.git.checkout(commit, force=True)
+        repo.git.checkout(commit, force=True, quiet=True)
         _current_checkout[repo_name] = commit
         return True
     except Exception as e:
