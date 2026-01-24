@@ -20,6 +20,9 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 import os
+
+import numpy as np
+from scipy.stats import percentileofscore
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -211,6 +214,107 @@ class CodeForensicsLLM:
         print(f"✓ Top-K files: {self.top_k}")
         print(f"✓ FAISS Mode: {'ENABLED (diff-only)' if self.use_faiss else 'DISABLED'}")
         print("=" * 60 + "\n")
+
+    def _contextualize_anomaly_score(self, file_score: float, all_scores: List[float]) -> str:
+        """Convert raw anomaly score to percentile rank."""
+        if not all_scores:
+            return "N/A"
+        percentile = int(percentileofscore(all_scores, file_score))
+        top_percent = 100 - percentile
+        return f"{percentile}th percentile (top {top_percent}% most atypical)"
+
+    def _compute_key_signals(self, file_data: Dict, cluster_stats: Dict) -> Dict[str, str]:
+        """Compute prioritized metrics for attention-directing."""
+        cluster_id = str(file_data['cluster_id'])
+        cluster_median_churn = cluster_stats.get(cluster_id, {}).get('median_churn', 0)
+
+        # Churn comparison
+        file_churn = file_data['raw_features']['churn_rate']
+        churn_ratio = file_churn / cluster_median_churn if cluster_median_churn > 0 else 1.0
+        churn_vs_cluster = f"{churn_ratio:.1f}× cluster median"
+
+        # Complexity trend
+        cc_slope = file_data['historical_trends']['cc']['value']
+        cc_label = file_data['historical_trends']['cc']['label']
+        complexity_trend = f"{cc_label} (slope: {cc_slope:.4f})"
+
+        return {
+            'churn_vs_cluster': churn_vs_cluster,
+            'complexity_trend': complexity_trend,
+            'maintainability_trend': file_data['historical_trends']['mi']['label'],
+            'import_volatility': file_data['imports_volatility_label']
+        }
+
+    def _validate_file_explanation(self, explanation: str, provided_commits: List[str]) -> Dict[str, Any]:
+        """Validate file-level output quality."""
+        violations = []
+
+        # 1. Word count
+        word_count = len(explanation.split())
+        if word_count > 250:
+            violations.append(f"Exceeded word limit: {word_count} words (max 250)")
+
+        # 2. Required sections
+        required_sections = [
+            'Why This File Stands Out',
+            'Evidence from Metrics',
+            'Evidence from Code Changes',
+            'What Makes This Unusual'
+        ]
+        for section in required_sections:
+            if section not in explanation:
+                violations.append(f"Missing required section: '{section}'")
+
+        # 3. Banned patterns (case-insensitive)
+        banned_patterns = [
+            'has undergone', 'has been modified', 'has experienced',
+            'suggests that', 'appears to', 'seems to indicate',
+            'significant changes', 'substantial modifications',
+            'development focused on', 'efforts were made'
+        ]
+        explanation_lower = explanation.lower()
+        for pattern in banned_patterns:
+            if pattern in explanation_lower:
+                violations.append(f"Contains banned pattern: '{pattern}'")
+
+        # 4. Commit grounding (check referenced commits exist in provided diffs)
+        commit_refs = re.findall(r'\b[0-9a-f]{7,40}\b', explanation)
+        for commit_ref in commit_refs:
+            if not any(commit_ref in commit for commit in provided_commits):
+                violations.append(f"References unknown commit: {commit_ref[:8]}")
+
+        return {
+            'valid': len(violations) == 0,
+            'violations': violations,
+            'word_count': word_count
+        }
+
+    def _extract_attention_signals(self, file_explanations: List[Dict]) -> str:
+        """Extract only the 'Why This File Stands Out' section from each file."""
+        signals = []
+        for file_exp in file_explanations:
+            file_path = file_exp.get('file', 'unknown')
+            explanation = file_exp.get('explanation', '')
+
+            # Extract first section (assumes markdown heading structure)
+            lines = explanation.split('\n')
+            why_section = []
+            in_section = False
+
+            for line in lines:
+                if '### Why This File Stands Out' in line or '## Why This File Stands Out' in line:
+                    in_section = True
+                    continue
+                if line.startswith('###') or line.startswith('##'):
+                    if in_section:
+                        break
+                elif in_section and line.strip():
+                    why_section.append(line.strip())
+
+            signal = ' '.join(why_section) if why_section else "(No signal extracted)"
+            signals.append(f"- **{file_path}**: {signal}")
+
+        return '\n'.join(signals)
     
     def load_data(self) -> None:
         """Load required data files."""
@@ -235,6 +339,24 @@ class CodeForensicsLLM:
         with open(DATA_DIR / "file_analysis.json") as f:
             self.file_analysis = json.load(f)
         print(f"✓ file_analysis.json ({len(self.file_analysis)} files)")
+
+        # Precompute anomaly score list for percentile context
+        self.all_anomaly_scores = [f.get('anomaly_score', 0) for f in self.file_analysis]
+
+        # Precompute cluster churn medians for key signals
+        churn_by_cluster: Dict[str, List[float]] = {}
+        for f in self.file_analysis:
+            cluster_id = str(f.get('cluster_id'))
+            churn_by_cluster.setdefault(cluster_id, []).append(
+                f.get('raw_features', {}).get('churn_rate', 0)
+            )
+
+        self.cluster_stats = {}
+        for cluster_id, churn_values in churn_by_cluster.items():
+            median_churn = float(np.median(churn_values)) if churn_values else 0.0
+            self.cluster_stats[cluster_id] = {
+                'median_churn': median_churn
+            }
         
         # Load cluster summary
         with open(DATA_DIR / "cluster_summary.json") as f:
@@ -253,38 +375,73 @@ class CodeForensicsLLM:
         
         print("-" * 60 + "\n")
     
-    def build_file_prompt(self, file_data: Dict[str, Any], diffs: List[Dict]) -> str:
+    def build_file_prompt(
+        self,
+        file_data: Dict[str, Any],
+        diffs: List[Dict],
+        anomaly_context: str,
+        key_signals: Dict[str, str]
+    ) -> str:
         """
-        Build neutral, epistemic-boundary-respecting prompt for file explanation.
-        
-        Inputs per file:
-        - Structured ML JSON (file_analysis.json entry)
-        - Cluster ID (label only)
-        - 2-3 windowed diffs retrieved via FAISS
-        - No other context
-        
-        The prompt explicitly forbids:
-        - Recommendations
-        - Risk predictions
-        - Severity assignments
-        - Speculation beyond evidence
+        Build attention-worthy prompt for file explanation.
         """
         # Format diffs for prompt
         diff_text = ""
         if diffs:
-            for i, diff in enumerate(diffs, 1):
+            # Hard limit: show max 2 diffs only
+            for i, diff in enumerate(diffs[:2], 1):
                 meta = diff['metadata']
                 diff_text += f"\n### Diff {i} (Commit: {meta['commit'][:8]})\n"
-                diff_text += f"```\n{diff['document'][:600]}\n```\n"
+                diff_text += f"```\n{diff['document']}\n```\n"
         else:
             diff_text = "No diffs available for this file."
-        
+
         # Get cluster label
         cluster_id = str(file_data['cluster_id'])
         cluster_info = self.cluster_summary.get(cluster_id, {})
         cluster_label = cluster_info.get('derived_cluster_label', f'Cluster {cluster_id}')
-        
-        prompt = f"""Characterize the evolutionary trajectory of this source code file based on the provided metric trends and code diffs.
+
+        prompt = f"""Given the metrics and code diffs for a single file, explain why this file stands out compared to other files in the same repository.
+
+Answer only this question:
+Why should a developer pay attention to this file?
+
+You are provided:
+- ML-detected metric trends (churn, complexity, volatility, anomaly score)
+- Cluster assignment (relative behavior group)
+- Retrieved code diffs (commit-level evidence)
+
+Use only this information.
+
+OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
+
+### Why This File Stands Out
+(1–2 sentences, plain English, no numbers)
+
+### Evidence from Metrics
+- Max 3 bullet points
+- Each bullet must compare this file to:
+  • other files in the repo, or
+  • files in its cluster
+
+### Evidence from Code Changes
+- Max 2 bullet points
+- Each bullet must reference a specific commit hash
+- Explain what changed and how it explains the metric behavior
+
+### What Makes This Unusual
+(1 sentence describing tension, deviation, or contradiction)
+
+HARD CONSTRAINTS:
+- Max 220 words total (will be validated)
+- Do NOT use: “has undergone”, “suggests that”, “appears to”, “development focused on”
+- Reference ONLY commits shown in diffs above
+- If no commit materially explains a metric trend, say so explicitly
+- Reference at most 2 commits, and only if they are provided
+- Do NOT use passive voice, hedging, or process narration
+- Do NOT give recommendations, predict risks, or assign severity
+- Do NOT restate cluster definitions
+- Each metric bullet MUST compare to cluster or repo average
 
 ## FILE INFORMATION
 
@@ -292,47 +449,22 @@ class CodeForensicsLLM:
 **Repository:** {file_data['repo_name']}
 **Cluster:** {cluster_label}
 
-## METRIC TRENDS (ML-Detected)
+## KEY SIGNALS (Use these first)
 
-**Evolution Summary:**
+**Anomaly Level:** {anomaly_context}
+**Churn vs Cluster:** {key_signals['churn_vs_cluster']}
+**Complexity Trend:** {key_signals['complexity_trend']}
+
+## SUPPORTING CONTEXT (Use if relevant)
+
 - Total commits analyzed: {file_data['n_commits']}
-- Anomaly score: {file_data['anomaly_score']:.4f}
-
-**Behavioral Labels (rule-based):**
-- Churn level: {file_data['churn_label']}
-- Complexity volatility: {file_data['cc_volatility_label']}
-- Import volatility: {file_data['imports_volatility_label']}
-
-**Historical Trends:**
-- Cyclomatic complexity: {file_data['historical_trends']['cc']['label']} (slope: {file_data['historical_trends']['cc']['value']:.4f})
-- Maintainability index: {file_data['historical_trends']['mi']['label']} (slope: {file_data['historical_trends']['mi']['value']:.4f})
-- Imports: {file_data['historical_trends']['imports']['label']} (slope: {file_data['historical_trends']['imports']['value']:.4f})
-
-**Raw Metrics:**
-- Churn rate: {file_data['raw_features']['churn_rate']:.1%}
-- Mean LOC delta: {file_data['raw_features']['mean_abs_loc_delta']:.1f}
-- Mean complexity: {file_data['raw_features']['mean_cc_after']:.2f} (+/- {file_data['raw_features']['std_cc_after']:.2f})
-- Mean maintainability: {file_data['raw_features']['mean_mi_after']:.2f}
+- Maintainability trend: {key_signals['maintainability_trend']}
+- Import volatility: {key_signals['import_volatility']}
+- Cluster assignment: {cluster_label}
 
 ## CODE DIFFS (Evidence Anchors)
 {diff_text}
-
-## YOUR TASK
-
-Provide a characterization (3-4 paragraphs) that:
-
-1. **Describes the evolutionary trajectory**: How has this file changed over time based on the metrics?
-2. **Interprets the patterns**: What do the metric trends suggest about how this file has been developed?
-3. **Grounds in evidence**: Reference specific commits and metric values where relevant.
-4. **Highlights discrepancies**: If the metrics and code changes appear contradictory, explicitly note this.
-
-**CONSTRAINTS (STRICTLY ENFORCED):**
-- Do NOT provide recommendations or suggest what developers should do
-- Do NOT predict risks, bugs, or future problems
-- Do NOT assign severity, priority, or urgency
-- Do NOT speculate beyond the provided evidence
-- Focus ONLY on characterizing WHAT the metrics show and WHY the code may have evolved this way"""
-
+"""
         return prompt
     
     def generate_file_explanation(
@@ -353,12 +485,23 @@ Provide a characterization (3-4 paragraphs) that:
         
         if self.use_faiss and self.retriever:
             diffs = self.retriever.retrieve_windowed_diffs(file_data, k=3)
+            diffs = diffs[:2]
             valid_commits = [d['metadata']['commit'] for d in diffs]
             logger.info(f"Retrieved {len(diffs)} diffs for {file_data['file_path']}")
             logger.info(f"Commits: {[c[:8] for c in valid_commits]}")
         
+        # Preprocessing: anomaly context + key signals
+        anomaly_context = self._contextualize_anomaly_score(
+            file_data.get('anomaly_score', 0),
+            getattr(self, 'all_anomaly_scores', [])
+        )
+        key_signals = self._compute_key_signals(
+            file_data,
+            getattr(self, 'cluster_stats', {})
+        )
+
         # Build prompt
-        prompt = self.build_file_prompt(file_data, diffs)
+        prompt = self.build_file_prompt(file_data, diffs, anomaly_context, key_signals)
         
         try:
             response = self.client.chat.completions.create(
@@ -367,9 +510,17 @@ Provide a characterization (3-4 paragraphs) that:
                     {
                         "role": "system",
                         "content": (
-                            "You are analyzing code evolution patterns. "
-                            "Your role is to interpret and explain, never to advise or predict. "
-                            "Describe what the data shows without making recommendations."
+                            "You are a code evolution analyst writing for busy developers. "
+                            "Your role is to flag files that deserve attention based on historical behavior. "
+                            "Rules for language: "
+                            "- Avoid passive or hedging constructions (e.g., 'has been', 'appears', 'suggests') "
+                            "- Avoid vague intensifiers ('significant', 'substantial', 'notable') "
+                            "- Avoid process narration ('efforts were made', 'development focused on') "
+                            "Preferred style: "
+                            "- Active voice with specific comparisons ('2x higher than cluster average') "
+                            "- Concrete contrasts ('only file in cluster with rising complexity') "
+                            "- Evidence-backed statements citing commit hashes "
+                            "Never diagnose bugs, predict risk, or give recommendations."
                         )
                     },
                     {
@@ -383,6 +534,52 @@ Provide a characterization (3-4 paragraphs) that:
             )
             
             explanation = response.choices[0].message.content.strip()
+
+            # Validate output
+            provided_commits = [d['metadata']['commit'] for d in diffs]
+            validation = self._validate_file_explanation(explanation, provided_commits)
+
+            if not validation['valid']:
+                logger.warning(f"Output validation failed for {file_data['file_path']}:")
+                for violation in validation['violations']:
+                    logger.warning(f"  - {violation}")
+
+                if validation['word_count'] > 250:
+                    logger.info("Attempting regeneration with stricter word limit...")
+                    stricter_prompt = (
+                        prompt
+                        + "\n\nCRITICAL: Stay under 200 words or output will be rejected."
+                    )
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a code evolution analyst writing for busy developers. "
+                                    "Your role is to flag files that deserve attention based on historical behavior. "
+                                    "Rules for language: "
+                                    "- Avoid passive or hedging constructions (e.g., 'has been', 'appears', 'suggests') "
+                                    "- Avoid vague intensifiers ('significant', 'substantial', 'notable') "
+                                    "- Avoid process narration ('efforts were made', 'development focused on') "
+                                    "Preferred style: "
+                                    "- Active voice with specific comparisons ('2x higher than cluster average') "
+                                    "- Concrete contrasts ('only file in cluster with rising complexity') "
+                                    "- Evidence-backed statements citing commit hashes "
+                                    "Never diagnose bugs, predict risk, or give recommendations."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": stricter_prompt
+                            }
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=1200,
+                        top_p=0.9,
+                    )
+                    explanation = response.choices[0].message.content.strip()
+                    validation = self._validate_file_explanation(explanation, provided_commits)
             
             # Grounding check: strip ungrounded commit references
             explanation = strip_ungrounded_commits(explanation, valid_commits)
@@ -401,7 +598,8 @@ Provide a characterization (3-4 paragraphs) that:
                 "cluster": str(file_data['cluster_id']),
                 "anomaly_score": file_data['anomaly_score'],
                 "referenced_commits": referenced,
-                "explanation": explanation
+                "explanation": explanation,
+                "validation": validation
             }
             
         except Exception as e:
@@ -440,44 +638,41 @@ Provide a characterization (3-4 paragraphs) that:
 
 """
         
-        # File explanations summary
-        explanations_text = "## FILE-LEVEL EXPLANATIONS\n\n"
-        for item in file_explanations:
-            explanations_text += f"""### {item['file']}
-**Cluster:** {item['cluster']} | **Anomaly Score:** {item['anomaly_score']:.4f}
-**Referenced Commits:** {', '.join(c[:8] for c in item['referenced_commits']) if item['referenced_commits'] else 'None'}
-
-{item['explanation'][:800]}{'...' if len(item['explanation']) > 800 else ''}
-
----
-
-"""
+        # Compressed file-level signals
+        signals_text = "## FILE-LEVEL ATTENTION SIGNALS\n\n"
+        signals_text += self._extract_attention_signals(file_explanations)
         
-        prompt = f"""Synthesize the evolutionary patterns across this repository based on the cluster characteristics and file-level explanations below.
+        prompt = f"""Using the cluster summaries and file-level outputs, produce a repository-level synthesis that highlights where evolution concentrates and where it behaves unexpectedly.
+
+Do NOT restate file summaries verbatim.
+
+OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
+
+### Dominant Evolutionary Modes
+- 2–3 labeled themes (e.g., “Refinement Zones”, “Complexity Accretion”)
+- Each label must be justified using metric relationships
+
+### Where Change Concentrates
+- Identify files or clusters that absorb a disproportionate share of churn or complexity change
+
+### Files That Defy Their Peers
+- Short list (2–4 files)
+- One-line explanation of how each deviates from its cluster
+
+### What This Says About the Repository
+- 2-3 sentences max
+- No fluff, no repetition
+
+HARD CONSTRAINTS:
+- No recommendations, action items, or risk language
+- No repeating cluster definitions
+- Prefer contrasts over descriptions
+- If no cross-file insight exists, say so explicitly
 
 {cluster_text}
 
-{explanations_text}
-
-## YOUR TASK
-
-Create a repository-level synthesis (4-5 paragraphs) that:
-
-1. **Summarizes observed patterns**: What evolutionary patterns emerge across the explained files?
-2. **Relates to cluster behavior**: How do individual file trajectories relate to their cluster characteristics?
-3. **Describes repository evolution**: How has this repository evolved based on the evidence?
-4. **Highlights areas of atypical change**: Which files or clusters show unusual evolutionary patterns?
-
-**LANGUAGE CONSTRAINTS (STRICTLY ENFORCED):**
-- Use "observed patterns" instead of "risks"
-- Use "evolutionary themes" instead of "concerns"
-- Use "areas of atypical change" instead of "problems"
-- Do NOT use: "recommend", "should", "must", "need to", "mitigation", "risk", "priority"
-- Do NOT provide action items or next steps
-- Focus ONLY on describing what the data shows
-
-This is an interpretive synthesis, not a prescriptive report."""
-
+{signals_text}
+"""
         return prompt
     
     def generate_repo_synthesis(
@@ -492,7 +687,6 @@ This is an interpretive synthesis, not a prescriptive report."""
         No re-analysis.
         """
         prompt = self.build_repo_synthesis_prompt(file_explanations)
-        
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -500,9 +694,17 @@ This is an interpretive synthesis, not a prescriptive report."""
                     {
                         "role": "system",
                         "content": (
-                            "You are synthesizing code evolution patterns across a repository. "
-                            "Describe observed patterns and evolutionary themes. "
-                            "Never provide recommendations, risk assessments, or action items."
+                            "You are synthesizing cross-file evolution patterns for a repository. "
+                            "Your role is to surface attention-directing signals, not recommendations or risk assessments. "
+                            "Theme quality rules: "
+                            "GOOD themes: "
+                            "- Describe a relationship between metrics (e.g., 'high churn with declining complexity') "
+                            "- Explain how multiple files behave similarly "
+                            "BAD themes: "
+                            "- Restate a single metric ('High Complexity Files') "
+                            "- Rename clusters ('Cluster 0 Behavior') "
+                            "- Use generic labels ('Active Development', 'Maintenance Mode') "
+                            "Be concise and comparative."
                         )
                     },
                     {
@@ -514,7 +716,6 @@ This is an interpretive synthesis, not a prescriptive report."""
                 max_tokens=2000,
                 top_p=0.9,
             )
-            
             return response.choices[0].message.content.strip()
             
         except Exception as e:
@@ -523,10 +724,10 @@ This is an interpretive synthesis, not a prescriptive report."""
     
     def run_pipeline(self, output_dir: str = "output", limit: Optional[int] = None) -> None:
         """
-        Run complete two-stage pipeline.
+        Run complete two-stage pipeline.\n\n
         
-        Stage 0: Select top-K anomalous files
-        Stage 1: Generate file-level explanations (N API calls)
+        Stage 0: Select top-K anomalous files\n
+        Stage 1: Generate file-level explanations (N API calls)\n
         Stage 2: Generate repository-level synthesis (1 API call)
         """
         output_path = Path(output_dir)
