@@ -18,6 +18,7 @@ patterns. The LLM layer handles the "so what does this mean" part.
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -131,9 +132,26 @@ FEATURE_NAMES = [
 # STEP 1: LOAD THE DATA AND GROUP BY FILE
 # =============================================================================
 
+def get_files_at_head(repo_path: Path) -> set:
+    """
+    Return a set of relative file paths present at the repository HEAD.
+    Paths are normalized with forward slashes.
+    """
+    valid_exts = (".ts", ".tsx", ".js", ".jsx", ".py", ".java")
+    head_files = set()
+
+    for root, _, files in os.walk(repo_path):
+        for f in files:
+            if f.endswith(valid_exts):
+                rel = os.path.relpath(os.path.join(root, f), repo_path)
+                head_files.add(rel.replace("\\", "/"))
+
+    return head_files
+
 def load_and_prepare_data(
-    min_commits: int = MIN_COMMITS_DEFAULT
-) -> Tuple[pd.DataFrame, Dict[Tuple[str, str], pd.DataFrame]]:
+    min_commits: int = MIN_COMMITS_DEFAULT,
+    repo_name: Optional[str] = None
+) -> Tuple[pd.DataFrame, Dict[Tuple[str, str], pd.DataFrame], Dict[str, set]]:
     """
     Load metrics and commits, merge them, group by file.
     
@@ -151,6 +169,22 @@ def load_and_prepare_data(
     # Load metrics data
     metrics_df = pd.read_csv(METRICS_FILE)
     print(f"  Loaded {len(metrics_df)} metric rows")
+
+    if repo_name:
+        metrics_df = metrics_df[metrics_df["repo_name"] == repo_name]
+        print(f"  Filtered to repo '{repo_name}': {len(metrics_df)} metric rows")
+
+    # Build HEAD file index per repo
+    repo_base = PROJECT_ROOT / "repos"
+    repo_names = metrics_df["repo_name"].unique().tolist()
+    head_files_by_repo: Dict[str, set] = {}
+    for repo_name in repo_names:
+        repo_path = repo_base / repo_name
+        if not repo_path.exists():
+            print(f"  Warning: repo path not found for {repo_name}: {repo_path}")
+            head_files_by_repo[repo_name] = set()
+            continue
+        head_files_by_repo[repo_name] = get_files_at_head(repo_path)
     
     # Load commits data for timestamps
     commits_df = pd.read_csv(COMMITS_FILE, usecols=["repo_name", "commit_hash", "timestamp"])
@@ -174,6 +208,9 @@ def load_and_prepare_data(
     file_groups: Dict[Tuple[str, str], pd.DataFrame] = {}
     
     for (repo, fpath), group in merged_df.groupby(["repo_name", "file_path"]):
+        head_files = head_files_by_repo.get(repo, set())
+        if fpath not in head_files:
+            continue
         sorted_group = group.sort_values("timestamp").reset_index(drop=True)
         
         # Skip files without enough history - can't see patterns in 2 commits
@@ -185,7 +222,7 @@ def load_and_prepare_data(
     print(f"  Total unique files: {total_files}")
     print(f"  Files with >= {min_commits} commits: {included_files}")
     
-    return merged_df, file_groups
+    return merged_df, file_groups, head_files_by_repo
 
 
 # =============================================================================
@@ -793,7 +830,8 @@ def export_results(
 
 def main(
     min_commits: int = MIN_COMMITS_DEFAULT,
-    recent_window: int = RECENT_WINDOW_DEFAULT
+    recent_window: int = RECENT_WINDOW_DEFAULT,
+    repo_name: Optional[str] = None
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Run the full pipeline from raw data to JSON output.
@@ -811,11 +849,14 @@ def main(
     print("=" * 60)
     print("ML Pipeline for Temporal Code Evolution Analysis")
     print("=" * 60)
-    print(f"Config: min_commits={min_commits}, recent_window={recent_window}")
+    print(f"Config: min_commits={min_commits}, recent_window={recent_window}, repo={repo_name or 'ALL'}")
     print()
     
     # Load everything and group by file
-    merged_df, file_groups = load_and_prepare_data(min_commits=min_commits)
+    merged_df, file_groups, head_files_by_repo = load_and_prepare_data(
+        min_commits=min_commits,
+        repo_name=repo_name
+    )
     
     if len(file_groups) == 0:
         print("\nNo files have enough commits to analyze. Try lowering --min-commits?")
@@ -849,6 +890,14 @@ def main(
     
     # Package it all up and write to JSON
     file_outputs = build_file_output(labeled_df, cluster_labels, anomaly_scores)
+
+    # Defensive assertion: ensure only HEAD files reach ML outputs
+    for f in file_outputs:
+        repo_name = f["repo_name"]
+        file_path = f["file_path"]
+        assert file_path in head_files_by_repo.get(repo_name, set()), (
+            f"Deleted file leaked into ML outputs: {file_path}"
+        )
     export_results(file_outputs, cluster_summaries)
     
     print()
@@ -875,7 +924,17 @@ if __name__ == "__main__":
         default=RECENT_WINDOW_DEFAULT,
         help=f"Recent window size for trend features (default: {RECENT_WINDOW_DEFAULT})"
     )
+    parser.add_argument(
+        "--repo",
+        type=str,
+        default=None,
+        help="Optional repo name to analyze (matches repo_name in metrics)"
+    )
     
     args = parser.parse_args()
     
-    main(min_commits=args.min_commits, recent_window=args.recent_window)
+    main(
+        min_commits=args.min_commits,
+        recent_window=args.recent_window,
+        repo_name=args.repo
+    )
