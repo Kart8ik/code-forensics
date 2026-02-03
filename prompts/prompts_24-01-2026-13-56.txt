@@ -1,0 +1,96 @@
+==========FILE-LEVEL PROMPTS==========
+
+prompt = f"""Characterize the evolutionary trajectory of this source code file based on the provided metric trends and code diffs.
+
+## FILE INFORMATION
+
+**File:** {file_data['file_path']}
+**Repository:** {file_data['repo_name']}
+**Cluster:** {cluster_label}
+
+## METRIC TRENDS (ML-Detected)
+
+**Evolution Summary:**
+- Total commits analyzed: {file_data['n_commits']}
+- Anomaly score: {file_data['anomaly_score']:.4f}
+
+**Behavioral Labels (rule-based):**
+- Churn level: {file_data['churn_label']}
+- Complexity volatility: {file_data['cc_volatility_label']}
+- Import volatility: {file_data['imports_volatility_label']}
+
+**Historical Trends:**
+- Cyclomatic complexity: {file_data['historical_trends']['cc']['label']} (slope: {file_data['historical_trends']['cc']['value']:.4f})
+- Maintainability index: {file_data['historical_trends']['mi']['label']} (slope: {file_data['historical_trends']['mi']['value']:.4f})
+- Imports: {file_data['historical_trends']['imports']['label']} (slope: {file_data['historical_trends']['imports']['value']:.4f})
+
+**Raw Metrics:**
+- Churn rate: {file_data['raw_features']['churn_rate']:.1%}
+- Mean LOC delta: {file_data['raw_features']['mean_abs_loc_delta']:.1f}
+- Mean complexity: {file_data['raw_features']['mean_cc_after']:.2f} (+/- {file_data['raw_features']['std_cc_after']:.2f})
+- Mean maintainability: {file_data['raw_features']['mean_mi_after']:.2f}
+
+## CODE DIFFS (Evidence Anchors)
+{diff_text}
+
+## YOUR TASK
+
+Provide a characterization (3-4 paragraphs) that:
+
+1. **Describes the evolutionary trajectory**: How has this file changed over time based on the metrics?
+2. **Interprets the patterns**: What do the metric trends suggest about how this file has been developed?
+3. **Grounds in evidence**: Reference specific commits and metric values where relevant.
+4. **Highlights discrepancies**: If the metrics and code changes appear contradictory, explicitly note this.
+
+**CONSTRAINTS (STRICTLY ENFORCED):**
+- Do NOT provide recommendations or suggest what developers should do
+- Do NOT predict risks, bugs, or future problems
+- Do NOT assign severity, priority, or urgency
+- Do NOT speculate beyond the provided evidence
+- Focus ONLY on characterizing WHAT the metrics show and WHY the code may have evolved this way"""
+
+
+
+"content": (
+                            "You are analyzing code evolution patterns. "
+                            "Your role is to interpret and explain, never to advise or predict. "
+                            "Describe what the data shows without making recommendations."
+                        )
+
+
+
+==========REPO-LEVEL PROMPTS==========
+
+
+
+prompt = f"""Synthesize the evolutionary patterns across this repository based on the cluster characteristics and file-level explanations below.
+
+{cluster_text}
+
+{explanations_text}
+
+## YOUR TASK
+
+Create a repository-level synthesis (4-5 paragraphs) that:
+
+1. **Summarizes observed patterns**: What evolutionary patterns emerge across the explained files?
+2. **Relates to cluster behavior**: How do individual file trajectories relate to their cluster characteristics?
+3. **Describes repository evolution**: How has this repository evolved based on the evidence?
+4. **Highlights areas of atypical change**: Which files or clusters show unusual evolutionary patterns?
+
+**LANGUAGE CONSTRAINTS (STRICTLY ENFORCED):**
+- Use "observed patterns" instead of "risks"
+- Use "evolutionary themes" instead of "concerns"
+- Use "areas of atypical change" instead of "problems"
+- Do NOT use: "recommend", "should", "must", "need to", "mitigation", "risk", "priority"
+- Do NOT provide action items or next steps
+- Focus ONLY on describing what the data shows
+
+This is an interpretive synthesis, not a prescriptive report."""
+
+
+"content": (
+                            "You are synthesizing code evolution patterns across a repository. "
+                            "Describe observed patterns and evolutionary themes. "
+                            "Never provide recommendations, risk assessments, or action items."
+                        )

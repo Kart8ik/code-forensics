@@ -8,7 +8,7 @@ from git import Repo
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-REPO_NAME = "next.js"    #change this before running for each repo
+REPO_NAME = "LeetCode-Analytics-Platform"    #change this before running for each repo
 REPO_PATH = PROJECT_ROOT / "repos" / REPO_NAME
 
 OUTPUT_DIR = PROJECT_ROOT / "data"

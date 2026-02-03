@@ -1,5 +1,7 @@
 /data
 /repos
+/output
 /cf-env
 /scripts/__pycache__/
 /scripts/node_modules/
+.env

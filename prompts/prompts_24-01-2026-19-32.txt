@@ -1,0 +1,132 @@
+==========FILE-LEVEL PROMPTS==========
+
+prompt = f"""Given the metrics and code diffs for a single file, explain why this file stands out compared to other files in the same repository.
+
+Answer only this question:
+Why should a developer pay attention to this file?
+
+You are provided:
+- ML-detected metric trends (churn, complexity, volatility, anomaly score)
+- Cluster assignment (relative behavior group)
+- Retrieved code diffs (commit-level evidence)
+
+Use only this information.
+
+OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
+
+### Why This File Stands Out
+(1-2 sentences, plain English, no numbers)
+
+### Evidence from Metrics
+- Max 3 bullet points
+- Each bullet must compare this file to:
+  • other files in the repo, or
+  • files in its cluster
+
+### Evidence from Code Changes
+- Max 2 bullet points
+- Each bullet must reference a specific commit hash
+- Explain what changed and how it explains the metric behavior
+
+### What Makes This Unusual
+(1 sentence describing tension, deviation, or contradiction)
+
+HARD CONSTRAINTS:
+- Max 220 words total (will be validated)
+- Do NOT use: “has undergone”, “suggests that”, “appears to”, “development focused on”
+- Reference ONLY commits shown in diffs above
+- If no commit materially explains a metric trend, say so explicitly
+- Reference at most 2 commits, and only if they are provided
+- Do NOT use passive voice, hedging, or process narration
+- Do NOT give recommendations, predict risks, or assign severity
+- Do NOT restate cluster definitions
+- Each metric bullet MUST compare to cluster or repo average
+
+## FILE INFORMATION
+
+**File:** {file_data['file_path']}
+**Repository:** {file_data['repo_name']}
+**Cluster:** {cluster_label}
+
+## KEY SIGNALS (Use these first)
+
+**Anomaly Level:** {anomaly_context}
+**Churn vs Cluster:** {key_signals['churn_vs_cluster']}
+**Complexity Trend:** {key_signals['complexity_trend']}
+
+## SUPPORTING CONTEXT (Use if relevant)
+
+- Total commits analyzed: {file_data['n_commits']}
+- Maintainability trend: {key_signals['maintainability_trend']}
+- Import volatility: {key_signals['import_volatility']}
+- Cluster assignment: {cluster_label}
+
+## CODE DIFFS (Evidence Anchors)
+{diff_text}
+"""
+
+
+"content": (
+                            "You are a code evolution analyst writing for busy developers. "
+                            "Your role is to flag files that deserve attention based on historical behavior. "
+                            "Rules for language: "
+                            "- Avoid passive or hedging constructions (e.g., 'has been', 'appears', 'suggests') "
+                            "- Avoid vague intensifiers ('significant', 'substantial', 'notable') "
+                            "- Avoid process narration ('efforts were made', 'development focused on') "
+                            "Preferred style: "
+                            "- Active voice with specific comparisons ('2x higher than cluster average') "
+                            "- Concrete contrasts ('only file in cluster with rising complexity') "
+                            "- Evidence-backed statements citing commit hashes "
+                            "Never diagnose bugs, predict risk, or give recommendations."
+                        )
+
+
+==========REPO-LEVEL PROMPTS==========
+
+
+
+prompt = f"""Using the cluster summaries and file-level outputs, produce a repository-level synthesis that highlights where evolution concentrates and where it behaves unexpectedly.
+
+Do NOT restate file summaries verbatim.
+
+OUTPUT FORMAT (STRICT — FOLLOW EXACTLY):
+
+### Dominant Evolutionary Modes
+- 2-3 labeled themes (e.g., “Refinement Zones”, “Complexity Accretion”)
+- Each label must be justified using metric relationships
+
+### Where Change Concentrates
+- Identify files or clusters that absorb a disproportionate share of churn or complexity change
+
+### Files That Defy Their Peers
+- Short list (2-4 files)
+- One-line explanation of how each deviates from its cluster
+
+### What This Says About the Repository
+- 2-3 sentences max
+- No fluff, no repetition
+
+HARD CONSTRAINTS:
+- No recommendations, action items, or risk language
+- No repeating cluster definitions
+- Prefer contrasts over descriptions
+- If no cross-file insight exists, say so explicitly
+
+{cluster_text}
+
+{signals_text}
+"""
+
+"content": (
+                            "You are synthesizing cross-file evolution patterns for a repository. "
+                            "Your role is to surface attention-directing signals, not recommendations or risk assessments. "
+                            "Theme quality rules: "
+                            "GOOD themes: "
+                            "- Describe a relationship between metrics (e.g., 'high churn with declining complexity') "
+                            "- Explain how multiple files behave similarly "
+                            "BAD themes: "
+                            "- Restate a single metric ('High Complexity Files') "
+                            "- Rename clusters ('Cluster 0 Behavior') "
+                            "- Use generic labels ('Active Development', 'Maintenance Mode') "
+                            "Be concise and comparative."
+                        )
