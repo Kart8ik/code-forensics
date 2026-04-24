@@ -1,0 +1,95 @@
+[
+  {
+    "cluster_id": 0,
+    "size": 18,
+    "avg_churn_rate": 0.7317432810853863,
+    "avg_cc_after": 2.6572487759560124,
+    "avg_cc_trend": 0.004614676085718626,
+    "avg_mi_after": 55.69717964820268,
+    "avg_mi_trend": -0.019261735701768107,
+    "avg_mi_volatility": 0.7221171749437902,
+    "avg_imports_after": 13.927356963212228,
+    "avg_imports_trend": -0.000658570464398964,
+    "avg_std_cc_after": 0.1002023796528822,
+    "avg_std_imports_after": 1.1361041232357962,
+    "avg_func_after": 22.948079807619283,
+    "churn_label_distribution": {
+      "high": 10,
+      "moderate": 7,
+      "low": 1
+    },
+    "cc_trend_label_distribution": {
+      "stable": 8,
+      "decreasing": 5,
+      "increasing": 5
+    },
+    "derived_cluster_label": "high churn, stable complexity"
+  },
+  {
+    "cluster_id": 1,
+    "size": 1,
+    "avg_churn_rate": 0.13043478260869565,
+    "avg_cc_after": 1.173913043478261,
+    "avg_cc_trend": 0.18379446640316202,
+    "avg_mi_after": 82.03130434782607,
+    "avg_mi_trend": -2.8132806324110673,
+    "avg_mi_volatility": 22.914579579653054,
+    "avg_imports_after": 43.73913043478261,
+    "avg_imports_trend": 0.22727272727272727,
+    "avg_std_cc_after": 1.4970326380435361,
+    "avg_std_imports_after": 1.9121000188832795,
+    "avg_func_after": 0.391304347826087,
+    "churn_label_distribution": {
+      "low": 1
+    },
+    "cc_trend_label_distribution": {
+      "increasing": 1
+    },
+    "derived_cluster_label": "low churn, growing complexity, high volatility"
+  },
+  {
+    "cluster_id": 2,
+    "size": 1,
+    "avg_churn_rate": 0.7560975609756098,
+    "avg_cc_after": 3.191951219512195,
+    "avg_cc_trend": 0.001162020905923345,
+    "avg_mi_after": 7.502439024390244,
+    "avg_mi_trend": -0.1418501742160279,
+    "avg_mi_volatility": 1.8378136201582098,
+    "avg_imports_after": 81.92682926829268,
+    "avg_imports_trend": 0.34860627177700343,
+    "avg_std_cc_after": 0.09397391957865549,
+    "avg_std_imports_after": 7.019224472484261,
+    "avg_func_after": 69.34146341463415,
+    "churn_label_distribution": {
+      "high": 1
+    },
+    "cc_trend_label_distribution": {
+      "stable": 1
+    },
+    "derived_cluster_label": "high churn, stable complexity"
+  },
+  {
+    "cluster_id": 3,
+    "size": 2,
+    "avg_churn_rate": 0.6285714285714286,
+    "avg_cc_after": 2.308285714285714,
+    "avg_cc_trend": -0.18057142857142858,
+    "avg_mi_after": 66.40899999999999,
+    "avg_mi_trend": -0.30742857142857194,
+    "avg_mi_volatility": 9.262903528817624,
+    "avg_imports_after": 11.87142857142857,
+    "avg_imports_trend": 0.4714285714285714,
+    "avg_std_cc_after": 0.7506641638524234,
+    "avg_std_imports_after": 1.7614752269503395,
+    "avg_func_after": 8.4,
+    "churn_label_distribution": {
+      "moderate": 1,
+      "high": 1
+    },
+    "cc_trend_label_distribution": {
+      "decreasing": 2
+    },
+    "derived_cluster_label": "moderate churn, declining complexity"
+  }
+]
