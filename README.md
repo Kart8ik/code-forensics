@@ -6,10 +6,6 @@ An **empirical study** evaluating whether combining **static code metrics**, **c
 
 The pipeline ends in an interactive **Streamlit dashboard** that visualises per-file anomaly scores, cluster membership, churn rates, and the LLM-generated repository synthesis report.
 
-![Dashboard 1](image1.png)
-![Dashboard 2](image2.png)
-![Dashboard 3](image3.png)
-
 ---
 ## System Architecture
 
@@ -181,6 +177,12 @@ streamlit run scripts/app.py
 ```
 
 Then open [http://localhost:8501](http://localhost:8501) in your browser.
+
+![Dashboard 1](image1.png)
+
+![Dashboard 2](image2.png)
+
+![Dashboard 3](image3.png)
 
 ### Dashboard Sections
 
