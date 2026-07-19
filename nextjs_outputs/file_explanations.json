@@ -1,0 +1,136 @@
+[
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/client/components/router-reducer/create-initial-router-state.ts",
+    "cluster": "2",
+    "anomaly_score": 1.0,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its frequent changes that simplify its codebase. Despite being in a moderate churn cluster, it exhibits a unique trend of decreasing complexity.\n\n### Evidence from Metrics\n* Churn rate is 1.17\u00d7 cluster median, indicating similar activity levels to its peers.\n* Complexity trend is decreasing 2.14\u00d7 faster than the cluster median, showing a notable simplification effort.\n* Anomaly level is top 0% most atypical, highlighting its extreme outlier behavior compared to other files.\n\n### Evidence from Code Changes\nShown commits do not directly explain the complexity trend behavior, as they primarily involve reverts and relands of a specific feature (\"Include server latency in debug info\").\n\n### What Makes This Unusual\nHigh churn paired with rapidly declining complexity reflects iterative simplification, which differs from typical high-activity files that accumulate complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 141
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/client/components/router-reducer/reducers/navigate-reducer.ts",
+    "cluster": "2",
+    "anomaly_score": 0.9922,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its combines frequent changes and simplification. It is an extreme outlier, ranking in the top 1% of most atypical files.\n\n### Evidence from Metrics\n* Churn rate is 1.00\u00d7 cluster median, indicating similar change frequency to its peers.\n* Complexity trend is decreasing, 0.63x slower than the cluster median, showing a gradual simplification.\n* Anomaly score places it in the top 1% of the repository, reflecting its unusual evolutionary behavior.\n\n### Evidence from Code Changes\nShown commits do not directly explain the complexity trend behavior, as they primarily involve reverts and relands of a specific feature.\n\n### What Makes This Unusual\nHigh churn paired with slowly declining complexity reflects iterative simplification, which differs from typical high-activity files that accumulate complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 132
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/client/components/router-reducer/reducers/refresh-reducer.ts",
+    "cluster": "2",
+    "anomaly_score": 0.989,
+    "referenced_commits": [
+      "56db4345f2eca501712d1963b78521a68a73803e"
+    ],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its unique combination of low churn rate and decreasing complexity. \n\n### Evidence from Metrics\n* Churn rate is 0.56x cluster median, indicating a lower than average change frequency.\n* Complexity trend is decreasing, 1.0x slower than cluster median, reflecting a simplification process.\n* Anomaly score places it in the top 2% of the repository, making it an extreme outlier.\n\n### Evidence from Code Changes\nCommit 56db4345: Deletes code that's no longer reachable, explaining the decrease in complexity. \n\n### What Makes This Unusual\nLow churn rate paired with decreasing complexity reflects maintenance-focused simplification, which differs from typical files that show increasing complexity with high churn rates.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 117
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/build/adapter/build-complete.ts",
+    "cluster": "0",
+    "anomaly_score": 0.9239,
+    "referenced_commits": [
+      "7a8019599e22cd0967310ef1a0938b0525341b2c"
+    ],
+    "explanation": "### Why This File Stands Out\nThis file changes frequently but simplifies with each modification, making it an attention-worthy case. Its evolutionary behavior reflects a unique combination of high churn and declining complexity.\n\n### Evidence from Metrics\n* Churn rate is 1.00x cluster median, indicating similar activity levels to its peers.\n* Complexity decreased 110.73x faster than the cluster median, showing a rapid simplification trend.\n* Anomaly score places it in the top 3% of the repository, marking it as an extreme outlier in terms of evolutionary behavior.\n\n### Evidence from Code Changes\nCommit 7a801959: Updated routes generation for build-complete, adding comprehensive route generation and normalization, which may explain the complexity decrease due to improved code organization.\n\n### What Makes This Unusual\nHigh churn paired with extremely rapid declining complexity reflects iterative simplification, which differs from typical high-activity files that accumulate complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 142
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/compiled/react-dom-experimental/cjs/react-dom-server.bun.production.js",
+    "cluster": "0",
+    "anomaly_score": 0.6519,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its unique combination of low churn rate and rapidly decreasing complexity. Despite being in a high-churn cluster, this file exhibits a distinct evolutionary behavior.\n\n### Evidence from Metrics\n* Churn rate is 0.37x cluster median, indicating a lower than average change frequency.\n* Complexity trend is decreasing 64.76x faster than the cluster median, reflecting a rapid simplification process.\n* Anomaly score places it in the top 4% of the repository, marking it as an extreme outlier in terms of its evolutionary behavior.\n\n### Evidence from Code Changes\nShown commits do not directly explain the complexity trend behavior, as they primarily involve React version upgrades without clear evidence of simplification or complexity reduction.\n\n### What Makes This Unusual\nLow churn rate paired with rapidly declining complexity reflects iterative simplification, which differs from typical high-churn files that accumulate complexity over time.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 151
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/build/static-paths/app.ts",
+    "cluster": "0",
+    "anomaly_score": 0.6356,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its combines low churn rate and rapidly increasing complexity. Its behavior is distinct from what is typically seen in high-churn clusters.\n\n### Evidence from Metrics\n* Churn rate is 0.78x cluster median, indicating a lower than average change frequency.\n* Complexity trend is increasing 43.96x faster than cluster median, showing a rapid growth in complexity.\n* Anomaly score places it in the top 5% of the repository, highlighting its extreme outlier behavior.\n\n### Evidence from Code Changes\nInsufficient commit context available for causal analysis.\n\n### What Makes This Unusual\nRapidly increasing complexity paired with a lower than average churn rate reflects a pattern of intentional complexity growth, which differs from typical high-churn files that often see complexity reduction or stabilization efforts.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 133
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/compiled/react-dom/cjs/react-dom-server.bun.production.js",
+    "cluster": "0",
+    "anomaly_score": 0.6294,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its unique combination of low churn rate and rapidly decreasing complexity. Its evolutionary behavior is distinct from typical files in its cluster.\n\n### Evidence from Metrics\n* Churn rate is 0.37\u00d7 cluster median, indicating a lower than average modification frequency.\n* Complexity trend is decreasing 63.83\u00d7 faster than the cluster median, showing a rapid simplification.\n* Anomaly level is in the top 6% of the repository, highlighting its atypical behavior.\n\n### Evidence from Code Changes\nInsufficient commit context available for causal analysis.\n\n### What Makes This Unusual\nLow churn rate paired with rapidly declining complexity reflects iterative simplification, which differs from typical high-churn files that accumulate complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 119
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/client/components/router-reducer/reducers/server-action-reducer.ts",
+    "cluster": "1",
+    "anomaly_score": 0.5296,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its high churn rate paired with a declining complexity trend. \n\n### Evidence from Metrics\n* Churn rate is 2.43x cluster median, indicating frequent modifications.\n* Complexity trend is decreasing, with a slope of -0.1696, reflecting simplification efforts.\n* Anomaly score places it in the top 6% of the repository, highlighting its atypical behavior.\n\n### Evidence from Code Changes\nShown commits do not directly explain the complexity trend behavior, as they primarily involve reverts and relands of a specific feature.\n\n### What Makes This Unusual\nHigh churn paired with declining complexity reflects iterative simplification, which differs from typical high-activity files that accumulate complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 114
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "test/development/app-dir/hydration-error-count/hydration-error-count.test.ts",
+    "cluster": "1",
+    "anomaly_score": 0.4992,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its unique combination of low churn rate and increasing complexity trend. \n\n### Evidence from Metrics\n* Churn rate is 0.68x cluster median, indicating a lower than average change frequency.\n* Complexity trend is increasing with a slope of 0.1600, which is unusual given the file's low churn rate.\n* Anomaly level is in the top 7% most atypical, highlighting its unusual behavior compared to other files in the repository.\n\n### Evidence from Code Changes\nShown commits do not directly explain complexity trend behavior.\n\n### What Makes This Unusual\nLow churn rate paired with increasing complexity reflects maintenance-focused changes with added logic, which differs from typical files that either stabilize complexity with low churn or accumulate complexity with high churn.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 131
+    }
+  },
+  {
+    "repo": "next.js",
+    "file": "packages/next/src/build/analysis/get-page-static-info.ts",
+    "cluster": "1",
+    "anomaly_score": 0.4795,
+    "referenced_commits": [],
+    "explanation": "### Why This File Stands Out\nThis file stands out due to its high churn rate and increasing complexity trend. Its evolutionary behavior reflects a unique pattern of development.\n\n### Evidence from Metrics\n* Churn rate is 1.94x cluster median, indicating moderately higher activity than its peers.\n* Complexity trend is increasing, with a slope of 0.0668, which is unusual for a file in a stable cluster.\n* Anomaly level is in the top 8% of the repository, indicating extreme outlier behavior.\n\n### Evidence from Code Changes\nShown commits do not directly explain the complexity trend behavior.\n\n### What Makes This Unusual\nHigh churn paired with increasing complexity reflects ongoing development and refinement, which differs from typical files in a stable cluster that tend to have lower churn rates and more stable complexity.",
+    "validation": {
+      "valid": true,
+      "violations": [],
+      "word_count": 133
+    }
+  }
+]

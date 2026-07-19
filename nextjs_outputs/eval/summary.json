@@ -1,0 +1,17 @@
+{
+  "inputs_dir": "C:\\Users\\Shri Karthik\\Desktop\\SEM-6-STUFF\\code-forensics\\output\\derived",
+  "outputs_dir": "C:\\Users\\Shri Karthik\\Desktop\\SEM-6-STUFF\\code-forensics\\output\\eval",
+  "k_fixed": 10,
+  "tables": {
+    "table_ii_selection_quality": "table_ii_selection_quality.csv",
+    "table_iii_cluster_coverage": "table_iii_cluster_coverage.csv",
+    "table_iv_file_type_distribution": "table_iv_file_type_distribution.csv"
+  },
+  "figure": {
+    "repo": "flask",
+    "file_path": "src/flask/app.py",
+    "metric": "loc_after",
+    "pdf": "C:\\Users\\Shri Karthik\\Desktop\\SEM-6-STUFF\\code-forensics\\output\\eval\\time_series_example.pdf",
+    "png": "C:\\Users\\Shri Karthik\\Desktop\\SEM-6-STUFF\\code-forensics\\output\\eval\\time_series_example.png"
+  }
+}

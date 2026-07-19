@@ -1,0 +1,4 @@
+repo,mode,files_explained,clusters_covered
+flask,LLM-only,10,0
+next.js,LLM-only,10,0
+next.js,Hybrid,10,3

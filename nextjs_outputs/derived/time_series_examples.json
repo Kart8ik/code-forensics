@@ -1,0 +1,359 @@
+{
+  "flask": {
+    "file_path": "src/flask/app.py",
+    "metric": "loc_after",
+    "series": [
+      {
+        "commit_hash": "6a4bf9eec13e035cf10ecc16e462049b4c967e41",
+        "commit_date": "2021-10-01T09:39:10-07:00",
+        "metric_value": "2093"
+      },
+      {
+        "commit_hash": "a74e266474f0981e9fc0d54d5dc430386823e4d7",
+        "commit_date": "2022-05-03T12:11:55-06:00",
+        "metric_value": "2095"
+      },
+      {
+        "commit_hash": "96c97dec095f204b8a557c5ea804afdd329e3c43",
+        "commit_date": "2022-06-06T10:04:05-07:00",
+        "metric_value": "2294"
+      },
+      {
+        "commit_hash": "84c722044ad03f7f5384f5314c8350b3a13d8dfa",
+        "commit_date": "2022-07-01T12:01:44-07:00",
+        "metric_value": "2304"
+      },
+      {
+        "commit_hash": "82c2e0366ce6b74a3786a64631ce58b85b3a7d4e",
+        "commit_date": "2022-07-08T11:13:09-07:00",
+        "metric_value": "2323"
+      },
+      {
+        "commit_hash": "e0dad454810dd081947d3ca2ff376c5096185698",
+        "commit_date": "2022-07-08T11:13:09-07:00",
+        "metric_value": "2324"
+      },
+      {
+        "commit_hash": "69f9845ef2da3051d74d4dade3e88ccf5b2ee3de",
+        "commit_date": "2022-07-13T07:42:52-07:00",
+        "metric_value": "2362"
+      },
+      {
+        "commit_hash": "5d8e35653fca0d7ee01519d556c7851089de82ea",
+        "commit_date": "2022-08-01T10:34:13-07:00",
+        "metric_value": "2362"
+      },
+      {
+        "commit_hash": "ef95998d79eed3b8350d8db825e3d98f25c179f2",
+        "commit_date": "2022-08-01T15:11:21-07:00",
+        "metric_value": "2383"
+      },
+      {
+        "commit_hash": "bfdd37110c67ebeb42061fb43cf684b05291241f",
+        "commit_date": "2022-08-01T16:58:55-07:00",
+        "metric_value": "2486"
+      },
+      {
+        "commit_hash": "714ccefeca33db9e87e8ef4abd0008af05c32a4d",
+        "commit_date": "2022-08-03T09:22:03-07:00",
+        "metric_value": "2548"
+      },
+      {
+        "commit_hash": "d178653b5f7a5ee2ba15e215ce60caeeb9ed82e1",
+        "commit_date": "2022-11-25T07:39:54-08:00",
+        "metric_value": "2548"
+      },
+      {
+        "commit_hash": "79032ca5f1c4747e5aeaa193bdeb2e4eae410ea6",
+        "commit_date": "2022-12-24T11:27:20-07:00",
+        "metric_value": "2551"
+      },
+      {
+        "commit_hash": "c4b39ba2f3fede0555f18fc03b0f2499bb0d424b",
+        "commit_date": "2023-03-11T08:19:22-08:00",
+        "metric_value": "2552"
+      },
+      {
+        "commit_hash": "09112cfc477a270f4b2990e1daf39db1dbe30e98",
+        "commit_date": "",
+        "metric_value": "2548"
+      },
+      {
+        "commit_hash": "166a2a6207027bff07fdfc5590ce04f9b37e9e8f",
+        "commit_date": "",
+        "metric_value": "2090"
+      },
+      {
+        "commit_hash": "190dd4df86874495f56bb088fbd0cb1d9f0e77a0",
+        "commit_date": "",
+        "metric_value": "2086"
+      },
+      {
+        "commit_hash": "1b552d0b0163e1c1ae3d4895438a9ce2b2bc098e",
+        "commit_date": "",
+        "metric_value": "2083"
+      },
+      {
+        "commit_hash": "22933a8cb424ffd65f2bec5bbfdbfa7e42105470",
+        "commit_date": "",
+        "metric_value": "2094"
+      },
+      {
+        "commit_hash": "39f93632964ecabfcb9c1980e2add922098aad80",
+        "commit_date": "",
+        "metric_value": "2277"
+      },
+      {
+        "commit_hash": "3f6cdbd8b35f2b887dddbdac5ef6461833b6dd3b",
+        "commit_date": "",
+        "metric_value": "2091"
+      },
+      {
+        "commit_hash": "4f03a769d44f6740490dd4ddf70e094c12a6090c",
+        "commit_date": "",
+        "metric_value": "2302"
+      },
+      {
+        "commit_hash": "5544d09477af3221d988ec18b086930c2d9e67cd",
+        "commit_date": "",
+        "metric_value": "2313"
+      },
+      {
+        "commit_hash": "61f62e6005f72c44a90026e2589b6bc5234f2f24",
+        "commit_date": "",
+        "metric_value": "2091"
+      },
+      {
+        "commit_hash": "69e2300608497bba103fd05735c878c0d642dd68",
+        "commit_date": "",
+        "metric_value": "2278"
+      },
+      {
+        "commit_hash": "6f79cb8a23467aa01f94f6ad53790f468ba77c76",
+        "commit_date": "",
+        "metric_value": "2084"
+      },
+      {
+        "commit_hash": "762382e436062183b1e1fa6f3bda594090a452e7",
+        "commit_date": "",
+        "metric_value": "2313"
+      },
+      {
+        "commit_hash": "81be290ec8889c157c84bc7ce857f883396c5daf",
+        "commit_date": "",
+        "metric_value": "2091"
+      },
+      {
+        "commit_hash": "88863288225d5ee13a79c463f2a39391b6a52c61",
+        "commit_date": "",
+        "metric_value": "2082"
+      },
+      {
+        "commit_hash": "91044c4d769efa7f20455e1b70457a7da95c26d8",
+        "commit_date": "",
+        "metric_value": "2324"
+      },
+      {
+        "commit_hash": "92acd05d9bd33419ab885e4472b28a1d5cc15d2e",
+        "commit_date": "",
+        "metric_value": "2184"
+      },
+      {
+        "commit_hash": "9b44bf2818d8e3cde422ad7f43fb33dfc6737289",
+        "commit_date": "",
+        "metric_value": "2321"
+      },
+      {
+        "commit_hash": "a406c297aafa28074d11ec6fd27c246c70418cb4",
+        "commit_date": "",
+        "metric_value": "2287"
+      },
+      {
+        "commit_hash": "a6a7a57380cd8f7410753c3b819ba6d09198d8c9",
+        "commit_date": "",
+        "metric_value": "2548"
+      },
+      {
+        "commit_hash": "c4c7f504be222c3aca9062656498ec3c72e2b2ad",
+        "commit_date": "",
+        "metric_value": "2551"
+      },
+      {
+        "commit_hash": "c9a1f7ad6545c9cc27c41c385f1d4cd9c7cf1a98",
+        "commit_date": "",
+        "metric_value": "2095"
+      },
+      {
+        "commit_hash": "ca2bfbb0ac66fbbeeedbf6bbe317bee45cb23d29",
+        "commit_date": "",
+        "metric_value": "2308"
+      },
+      {
+        "commit_hash": "eb5dd9f5ef255c578cbbe13c1cb4dd11389d5519",
+        "commit_date": "",
+        "metric_value": "2136"
+      },
+      {
+        "commit_hash": "f8cb0b0dd5ea30729db6b131aeeb30915ea4860b",
+        "commit_date": "",
+        "metric_value": "2310"
+      },
+      {
+        "commit_hash": "fac630379d31baaa1667894c2b5613304285a4bb",
+        "commit_date": "",
+        "metric_value": "2139"
+      },
+      {
+        "commit_hash": "fdab801fbbd9de5adbdb3320ca4a1cb116c892f5",
+        "commit_date": "",
+        "metric_value": "2106"
+      }
+    ]
+  },
+  "next.js": {
+    "file_path": "packages/next/src/server/app-render/app-render.tsx",
+    "metric": "loc_after",
+    "series": [
+      {
+        "commit_hash": "718141176db250839ae2f493d8cac7637f22290c",
+        "commit_date": "2025-10-16T09:32:51+02:00",
+        "metric_value": "3935"
+      },
+      {
+        "commit_hash": "66376415ab585f25d753258452f7014ba4927793",
+        "commit_date": "2025-10-16T17:08:02+02:00",
+        "metric_value": "3964"
+      },
+      {
+        "commit_hash": "56db4345f2eca501712d1963b78521a68a73803e",
+        "commit_date": "2025-10-17T01:47:17-04:00",
+        "metric_value": "3958"
+      },
+      {
+        "commit_hash": "5ccc9078e094215e6c891c38a31fb94cda03456e",
+        "commit_date": "2025-10-17T15:30:47-04:00",
+        "metric_value": "3981"
+      },
+      {
+        "commit_hash": "85c3d20a917a5256dd632046f5e5863569755b1c",
+        "commit_date": "2025-10-18T14:13:44-07:00",
+        "metric_value": "3983"
+      },
+      {
+        "commit_hash": "49fcbd93f2c579d79f2005dccf82a93686d6919a",
+        "commit_date": "2025-10-18T16:03:42-07:00",
+        "metric_value": "4032"
+      },
+      {
+        "commit_hash": "553f2b6bad9ce1b73749dba8a370842ca61f5da0",
+        "commit_date": "2025-10-19T01:21:47-07:00",
+        "metric_value": "4083"
+      },
+      {
+        "commit_hash": "f8f24aa47924ca8c9ce2094cde3014c50fe85ac7",
+        "commit_date": "2025-10-19T17:25:50+00:00",
+        "metric_value": "4093"
+      },
+      {
+        "commit_hash": "2ed06f03e810b3a2dcec4b60a452621a08f4b068",
+        "commit_date": "2025-10-20T10:34:35-07:00",
+        "metric_value": "4104"
+      },
+      {
+        "commit_hash": "277f9566d5c647c53db639c554f47c5794ae0956",
+        "commit_date": "2025-10-20T10:53:19-07:00",
+        "metric_value": "4112"
+      },
+      {
+        "commit_hash": "899b473ec695b2c9203eb5578f4bec7b0988fd91",
+        "commit_date": "2025-10-20T12:23:56-04:00",
+        "metric_value": "4092"
+      },
+      {
+        "commit_hash": "20cf4c07dad6fae2d319cad7ee6bea8ef626fab8",
+        "commit_date": "2025-10-20T12:42:43-07:00",
+        "metric_value": "4117"
+      },
+      {
+        "commit_hash": "683a318d7962b6f1074301f4cf853ebd1fa79eea",
+        "commit_date": "2025-10-21T03:33:54-04:00",
+        "metric_value": "4243"
+      },
+      {
+        "commit_hash": "47ceda3c141e1afb6ed670fe1f817df7f92e7d45",
+        "commit_date": "2025-10-21T16:04:48-07:00",
+        "metric_value": "4246"
+      },
+      {
+        "commit_hash": "c0c75e4aaa8ece2c9e789e2e3f150d7487b60bbc",
+        "commit_date": "2025-10-29T09:55:51-07:00",
+        "metric_value": "4230"
+      },
+      {
+        "commit_hash": "2f052b16f64ccf68d749b8ca8b07325d338db3a4",
+        "commit_date": "2025-10-30T19:49:05-07:00",
+        "metric_value": "4227"
+      },
+      {
+        "commit_hash": "575c8a7dcf309c9ae5c55faa130958f5ce7273db",
+        "commit_date": "2025-11-04T15:34:26-08:00",
+        "metric_value": "4225"
+      },
+      {
+        "commit_hash": "2f86fbab810d3dd6ceb95bc5dea5b96525fe03b9",
+        "commit_date": "2025-11-04T18:44:59-08:00",
+        "metric_value": "4321"
+      },
+      {
+        "commit_hash": "937a3246f214f5c7f648d90ff4df6e86dc982790",
+        "commit_date": "2025-11-05T15:57:09+01:00",
+        "metric_value": "4320"
+      },
+      {
+        "commit_hash": "0ffa31e80e6c0aff4a53e90ede679cc2bd969734",
+        "commit_date": "2025-11-05T18:14:31+00:00",
+        "metric_value": "4317"
+      },
+      {
+        "commit_hash": "a976c918e8b05be17ea1048ffae84b2b95123d72",
+        "commit_date": "2025-11-05T22:09:31+00:00",
+        "metric_value": "4316"
+      },
+      {
+        "commit_hash": "8de523ae224a8024572859319a9ee411be1fa5d2",
+        "commit_date": "2025-11-15T23:17:29+01:00",
+        "metric_value": "4319"
+      },
+      {
+        "commit_hash": "d7608f7ecc58f7ca3097d7f54ffc3c202da4ccfd",
+        "commit_date": "2025-11-18T09:15:54-07:00",
+        "metric_value": "4319"
+      },
+      {
+        "commit_hash": "3f4db01dbc1921d366a125a298850d5afaee88a7",
+        "commit_date": "2025-11-20T17:13:37+01:00",
+        "metric_value": "4485"
+      },
+      {
+        "commit_hash": "07a415f5f37ed849d23c5375a7a0906254a07c12",
+        "commit_date": "",
+        "metric_value": "4211"
+      },
+      {
+        "commit_hash": "7fea7876b202612d0292730ac787423ce66fbfb6",
+        "commit_date": "",
+        "metric_value": "4316"
+      },
+      {
+        "commit_hash": "bf99e962b8bcd80b8d32713f2e70b3556c5539f2",
+        "commit_date": "",
+        "metric_value": "4243"
+      },
+      {
+        "commit_hash": "c6ff4d0ad6db2dee32a2562eefbe19612205803e",
+        "commit_date": "",
+        "metric_value": "4116"
+      }
+    ]
+  }
+}

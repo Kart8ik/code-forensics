@@ -53,7 +53,14 @@ code-forensics/
 │   └── <cloned_repos>/               # Target repositories
 └── cf-env/                           # Python virtual environment
 ```
+---
+## Publication
 
+Accepted and presented at **IEEE CONECCT 2026**.
+
+- [IEEE Xplore Publication](...)
+- [Presentation Certificate](/presentation_certificate.pdf)
+- [Preprint PDF](...)
 ---
 
 ## Setup
