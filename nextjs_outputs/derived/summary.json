@@ -1,0 +1,22 @@
+{
+  "repos": [
+    "flask",
+    "next.js"
+  ],
+  "top_k": 10,
+  "outputs": [
+    "selection_llm_only_top10.json",
+    "selection_llm_only_top10.csv",
+    "selection_hybrid_top10.json",
+    "selection_hybrid_top10.csv",
+    "cluster_assignments.csv",
+    "file_metadata.csv",
+    "time_series_examples.json",
+    "time_series_examples.csv"
+  ],
+  "counts": {
+    "file_analysis_entries": 117,
+    "file_changes_rows": 7902,
+    "metrics_all_rows": 3074
+  }
+}

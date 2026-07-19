@@ -1,7 +1,7 @@
 {
-  "commit_grounding_rate": 90.0,
+  "commit_grounding_rate": 100.0,
   "quantified_comparison_rate": 100.0,
   "word_limit_compliance": 100.0,
-  "violation_rate": 10.0,
+  "violation_rate": 0.0,
   "total_files": 10
 }

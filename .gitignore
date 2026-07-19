@@ -5,3 +5,5 @@
 /scripts/__pycache__/
 /scripts/node_modules/
 .env
+PPT_DECK_CONTENT.md
+REPORT.md

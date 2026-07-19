@@ -1,0 +1,11 @@
+repo_name,file_path,score,score_label
+next.js,packages/next/src/client/components/router-reducer/create-initial-router-state.ts,1.0,anomaly_score
+next.js,packages/next/src/client/components/router-reducer/reducers/navigate-reducer.ts,0.9922,anomaly_score
+next.js,packages/next/src/client/components/router-reducer/reducers/refresh-reducer.ts,0.989,anomaly_score
+next.js,packages/next/src/build/adapter/build-complete.ts,0.9239,anomaly_score
+next.js,packages/next/src/compiled/react-dom-experimental/cjs/react-dom-server.bun.production.js,0.6519,anomaly_score
+next.js,packages/next/src/build/static-paths/app.ts,0.6356,anomaly_score
+next.js,packages/next/src/compiled/react-dom/cjs/react-dom-server.bun.production.js,0.6294,anomaly_score
+next.js,packages/next/src/client/components/router-reducer/reducers/server-action-reducer.ts,0.5296,anomaly_score
+next.js,test/development/app-dir/hydration-error-count/hydration-error-count.test.ts,0.4992,anomaly_score
+next.js,packages/next/src/build/analysis/get-page-static-info.ts,0.4795,anomaly_score

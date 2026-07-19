@@ -1,0 +1,64 @@
+{
+  "next.js": [
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/client/components/router-reducer/create-initial-router-state.ts",
+      "score": 1.0,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/client/components/router-reducer/reducers/navigate-reducer.ts",
+      "score": 0.9922,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/client/components/router-reducer/reducers/refresh-reducer.ts",
+      "score": 0.989,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/build/adapter/build-complete.ts",
+      "score": 0.9239,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/compiled/react-dom-experimental/cjs/react-dom-server.bun.production.js",
+      "score": 0.6519,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/build/static-paths/app.ts",
+      "score": 0.6356,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/compiled/react-dom/cjs/react-dom-server.bun.production.js",
+      "score": 0.6294,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/client/components/router-reducer/reducers/server-action-reducer.ts",
+      "score": 0.5296,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "test/development/app-dir/hydration-error-count/hydration-error-count.test.ts",
+      "score": 0.4992,
+      "score_label": "anomaly_score"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/src/build/analysis/get-page-static-info.ts",
+      "score": 0.4795,
+      "score_label": "anomaly_score"
+    }
+  ]
+}

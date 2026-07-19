@@ -1,0 +1,8 @@
+repo,mode,file_type,percent
+flask,LLM-only,code,50.0
+flask,LLM-only,deps,10.0
+flask,LLM-only,docs,40.0
+next.js,Hybrid,code,90.0
+next.js,Hybrid,tests,10.0
+next.js,LLM-only,code,10.0
+next.js,LLM-only,deps,90.0

@@ -12,7 +12,7 @@ import plotly.express as px
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
-OUTPUT_DIR = PROJECT_ROOT / "output"
+OUTPUT_DIR = PROJECT_ROOT / "nextjs_outputs"
 
 FILE_ANALYSIS_PATH = DATA_DIR / "file_analysis.json"
 CLUSTER_SUMMARY_PATH = DATA_DIR / "cluster_summary.json"

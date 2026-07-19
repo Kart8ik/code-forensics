@@ -1,0 +1,4 @@
+repo,mode,k_fixed,dominant_file_type,count
+flask,LLM-only,10,code,5
+next.js,Hybrid,10,code,9
+next.js,LLM-only,10,deps,9

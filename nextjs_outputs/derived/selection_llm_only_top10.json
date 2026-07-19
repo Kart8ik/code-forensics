@@ -1,0 +1,126 @@
+{
+  "flask": [
+    {
+      "repo_name": "flask",
+      "file_path": "CHANGES.rst",
+      "score": 88.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "src/flask/app.py",
+      "score": 41.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": ".pre-commit-config.yaml",
+      "score": 30.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "requirements/dev.txt",
+      "score": 27.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "src/flask/__init__.py",
+      "score": 23.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "src/flask/cli.py",
+      "score": 22.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "src/flask/scaffold.py",
+      "score": 22.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "requirements/tests.txt",
+      "score": 20.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "requirements/typing.txt",
+      "score": 20.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "flask",
+      "file_path": "src/flask/helpers.py",
+      "score": 19.0,
+      "score_label": "commit_count"
+    }
+  ],
+  "next.js": [
+    {
+      "repo_name": "next.js",
+      "file_path": "pnpm-lock.yaml",
+      "score": 75.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next/package.json",
+      "score": 53.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/eslint-config-next/package.json",
+      "score": 50.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next-rspack/package.json",
+      "score": 50.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/next-swc/package.json",
+      "score": 50.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "lerna.json",
+      "score": 49.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/create-next-app/package.json",
+      "score": 49.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/eslint-plugin-internal/package.json",
+      "score": 49.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/eslint-plugin-next/package.json",
+      "score": 49.0,
+      "score_label": "commit_count"
+    },
+    {
+      "repo_name": "next.js",
+      "file_path": "packages/font/package.json",
+      "score": 49.0,
+      "score_label": "commit_count"
+    }
+  ]
+}
